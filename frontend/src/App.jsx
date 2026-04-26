@@ -23,13 +23,13 @@ class ErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: 40, background: '#050508', color: '#fff', height: '100vh', fontFamily: 'monospace' }}>
+        <div style={{ padding: 40, background: '#070d18', color: '#e2eaf5', height: '100vh', fontFamily: "'Rajdhani','Segoe UI',sans-serif" }}>
           <h1 style={{ color: '#ef4444' }}>❌ Erro Crítico no Frontend</h1>
-          <pre style={{ background: '#1a1a25', padding: 20, borderRadius: 8, overflow: 'auto' }}>
+          <pre style={{ background: '#0b1525', padding: 20, borderRadius: 8, overflow: 'auto', border: '1px solid rgba(59,158,255,0.12)' }}>
             {this.state.error?.toString()}
           </pre>
           <button 
-            style={{ padding: '10px 20px', background: '#38bdf8', border: 'none', borderRadius: 4, cursor: 'pointer', marginTop: 20 }}
+            style={{ padding: '10px 20px', background: '#3b9eff', border: 'none', borderRadius: 8, cursor: 'pointer', marginTop: 20, color: '#fff', fontWeight: 800, letterSpacing: '0.06em' }}
             onClick={() => { localStorage.clear(); window.location.href = '/'; }}
           >
             Limpar Cache e Reiniciar
@@ -59,7 +59,7 @@ const getInitialAPI = () => {
   if (urlApi && urlApi.length > 5) return urlApi;
 
   // 2. Verifica se há uma URL salva no localStorage
-  const savedApi = localStorage.getItem("NEXUS_API_URL");
+  const savedApi = localStorage.getItem("ETI_API_URL");
   if (savedApi && savedApi.length > 5) return savedApi;
 
   // 3. Verifica variável de ambiente do Vite
@@ -85,21 +85,6 @@ const getInitialAPI = () => {
   // 6. Fallback final: Mesma origem
   return window.location.origin;
 };
-
-const FuturisticLogo = ({ size = 42 }) => (
-  <img
-    src="/eti-sentinel-logo.jpg"
-    alt="ETI SENTINEL"
-    style={{
-      width: size,
-      height: size,
-      marginRight: 12,
-      filter: "drop-shadow(0 0 10px rgba(56, 189, 248, 0.55))",
-      borderRadius: 10,
-      objectFit: "cover",
-    }}
-  />
-);
 
 function LogoMark({ size = 52 }) {
   return (
@@ -286,7 +271,7 @@ const EXPRESSIONS = [
 
 const PLANS = [
   { value: "basic",      label: "Basic",      color: "#64748b" },
-  { value: "pro",        label: "Pro",        color: "#38bdf8" },
+  { value: "pro",        label: "Pro",        color: "#3b9eff" },
   { value: "enterprise", label: "Enterprise", color: "#a78bfa" },
 ];
 
@@ -312,7 +297,7 @@ const S = {
     flexDirection: "column", 
     padding: 0, 
     flexShrink: 0,
-    boxShadow: "10px 0 30px rgba(0,0,0,0.45)"
+    boxShadow: "10px 0 30px rgba(0,0,0,0.35)"
   },
   logo: { padding: "28px 20px 22px", borderBottom: "1px solid rgba(59,158,255,0.08)", background: "linear-gradient(180deg,rgba(59,158,255,0.05) 0%,transparent 100%)" },
   logoTitle: { 
@@ -323,7 +308,7 @@ const S = {
     lineHeight: 1.1,
     textTransform: "uppercase",
     fontFamily: "'Exo 2',sans-serif",
-    textShadow: "0 0 16px rgba(59,158,255,0.6)"
+    textShadow: "none"
   },
   logoSub: { fontSize: 9, color: "#2a5070", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 4 },
   navSection: { fontSize: 9, color: "#1e3a5a", fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", padding: "0 10px", margin: "18px 0 8px" },
@@ -344,7 +329,7 @@ const S = {
     marginBottom: 2,
     textAlign: "left",
     position: "relative",
-    boxShadow: a ? "0 0 14px rgba(59,158,255,0.06)" : "none",
+    boxShadow: "none",
     cursor: "pointer",
     userSelect: "none",
     transition: "background 0.15s ease, border-color 0.15s ease, color 0.15s ease"
@@ -357,7 +342,7 @@ const S = {
     marginBottom: 6, 
     letterSpacing: 1,
     textTransform: "uppercase",
-    textShadow: "0 0 15px rgba(255,255,255,0.2)"
+    textShadow: "none"
   },
   pageSub: { fontSize: 12, color: "#64748b", marginBottom: 30, letterSpacing: 0.5 },
   grid: (cols) => ({ 
@@ -368,12 +353,11 @@ const S = {
   }),
   card: { background: "#0d1929", border: "1px solid rgba(59,158,255,0.1)", borderRadius: 12, padding: 22 },
   statCard: (c) => ({ 
-    background: "rgba(10, 15, 26, 0.6)", 
-    backdropFilter: "blur(12px)",
-    border: `1px solid ${c}40`, 
+    background: "#0d1929",
+    border: `1px solid ${c}20`, 
     borderRadius: 16, 
     padding: 24,
-    boxShadow: `0 0 20px ${c}10`,
+    boxShadow: "none",
     transition: "transform 0.2s ease"
   }),
   statVal: (c) => ({ 
@@ -381,7 +365,7 @@ const S = {
     fontWeight: 800, 
     color: c, 
     lineHeight: 1,
-    textShadow: `0 0 15px ${c}60`
+    textShadow: "none"
   }),
   statLabel: { fontSize: 11, color: "#64748b", marginTop: 8, textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 600 },
   badge: (c) => ({ 
@@ -397,104 +381,101 @@ const S = {
     border: `1px solid ${c}40`,
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    boxShadow: `0 0 10px ${c}20`
+    boxShadow: "none"
   }),
   btn: (v = "primary") => ({ 
     padding: "10px 20px", 
     borderRadius: 8, 
-    border: v === "ghost" ? "1px solid rgba(56, 189, 248, 0.1)" : "1px solid transparent", 
+    border: v === "ghost" ? "1px solid rgba(59, 158, 255, 0.18)" : "1px solid transparent", 
     cursor: "pointer", 
     fontSize: 12, 
     fontWeight: 700, 
     fontFamily: "inherit", 
-    background: v === "primary" ? "#38bdf8" : v === "danger" ? "#ef4444" : v === "purple" ? "#a78bfa" : "rgba(15, 23, 42, 0.6)", 
-    color: v === "ghost" ? "#94a3b8" : "#050508", 
+    background: v === "primary" ? "#3b9eff" : v === "danger" ? "#ef4444" : v === "purple" ? "#a78bfa" : "rgba(59, 158, 255, 0.08)", 
+    color: v === "ghost" ? "#3b9eff" : "#fff", 
     transition: "all 0.2s ease",
     textTransform: "uppercase",
     letterSpacing: 1,
-    boxShadow: v !== "ghost" ? `0 4px 15px ${v === "primary" ? "#38bdf866" : v === "danger" ? "#ef444466" : "#00000044"}` : "none"
+    boxShadow: "none"
   }),
   btnSm: (v = "ghost") => ({ 
     padding: "6px 14px", 
     borderRadius: 6, 
-    border: "1px solid rgba(56, 189, 248, 0.15)", 
+    border: "1px solid rgba(59, 158, 255, 0.18)", 
     cursor: "pointer", 
     fontSize: 10, 
     fontWeight: 600, 
     fontFamily: "inherit", 
-    background: v === "danger" ? "rgba(239, 68, 68, 0.15)" : "rgba(15, 23, 42, 0.6)", 
-    color: v === "danger" ? "#ef4444" : "#38bdf8",
+    background: v === "danger" ? "rgba(239, 68, 68, 0.12)" : "rgba(59, 158, 255, 0.08)", 
+    color: v === "danger" ? "#ef4444" : "#3b9eff",
     transition: "all 0.2s ease",
     textTransform: "uppercase",
     letterSpacing: 0.5
   }),
   input: { 
     width: "100%", 
-    background: "rgba(5, 5, 10, 0.6)", 
-    border: "1px solid rgba(56, 189, 248, 0.2)", 
+    background: "#0b1525", 
+    border: "1px solid rgba(59, 158, 255, 0.18)", 
     borderRadius: 8, 
     padding: "12px 16px", 
-    color: "#fff", 
+    color: "#e2eaf5", 
     fontSize: 13, 
     fontFamily: "inherit", 
     boxSizing: "border-box", 
     outline: "none",
-    transition: "all 0.2s ease",
-    boxShadow: "inset 0 2px 4px rgba(0,0,0,0.5)",
-    "&:focus": { borderColor: "#38bdf8", boxShadow: "0 0 10px rgba(56, 189, 248, 0.2), inset 0 2px 4px rgba(0,0,0,0.5)" }
+    transition: "border-color 0.2s ease"
   },
   select: { 
     width: "100%", 
-    background: "rgba(5, 5, 10, 0.6)", 
-    border: "1px solid rgba(56, 189, 248, 0.2)", 
+    background: "#0b1525", 
+    border: "1px solid rgba(59, 158, 255, 0.18)", 
     borderRadius: 8, 
     padding: "12px 16px", 
-    color: "#fff", 
+    color: "#e2eaf5", 
     fontSize: 13, 
     fontFamily: "inherit", 
     boxSizing: "border-box", 
     outline: "none",
-    transition: "all 0.2s ease",
-    boxShadow: "inset 0 2px 4px rgba(0,0,0,0.5)"
+    transition: "border-color 0.2s ease"
   },
   label: { fontSize: 11, color: "#64748b", marginBottom: 6, display: "block", textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 },
   fg: { marginBottom: 20 },
   table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px", fontSize: 13 },
-  th: { padding: "12px 16px", textAlign: "left", color: "#4a6080", fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 700, borderBottom: "1px solid rgba(56, 189, 248, 0.1)" },
-  td: { padding: "16px", background: "rgba(15, 23, 42, 0.4)", borderTop: "1px solid rgba(56, 189, 248, 0.05)", borderBottom: "1px solid rgba(56, 189, 248, 0.05)", color: "#cbd5e1" },
-  modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
+  th: { padding: "12px 16px", textAlign: "left", color: "#1e3a5a", fontSize: 10, textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 700, borderBottom: "1px solid rgba(59,158,255,0.08)" },
+  td: { padding: "16px", background: "#0d1929", borderTop: "1px solid rgba(59,158,255,0.06)", borderBottom: "1px solid rgba(59,158,255,0.06)", color: "#b8cfe8" },
+  modal: { position: "fixed", inset: 0, background: "rgba(7,13,24,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
   modalBox: { 
-    background: "rgba(10, 15, 26, 0.95)", 
-    border: "1px solid rgba(56, 189, 248, 0.4)", 
+    background: "#0b1525", 
+    border: "1px solid rgba(59,158,255,0.18)", 
     borderRadius: 20, 
     padding: window.innerWidth < 768 ? 20 : 32, 
     width: "95%",
     maxWidth: 600, 
     maxHeight: "90vh", 
     overflowY: "auto",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.8), 0 0 30px rgba(56, 189, 248, 0.15)"
+    boxShadow: "0 20px 60px rgba(0,0,0,0.55)"
   },
-  modalTitle: { fontSize: 20, fontWeight: 800, color: "#fff", marginBottom: 24, textTransform: "uppercase", letterSpacing: 1, textShadow: "0 0 15px rgba(56, 189, 248, 0.5)", display: "flex", alignItems: "center", gap: 10 },
-  sectionTitle: { fontSize: 11, fontWeight: 800, color: "#38bdf8", marginBottom: 16, textTransform: "uppercase", letterSpacing: 2, background: "rgba(56, 189, 248, 0.05)", padding: "6px 12px", borderRadius: 6, display: "inline-block" },
-  divider: { borderTop: "1px solid rgba(56, 189, 248, 0.1)", margin: "24px 0" },
-  tag: { display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)", borderRadius: 6, padding: "3px 10px", fontSize: 10, fontWeight: 700, marginRight: 6, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5, boxShadow: "0 0 10px rgba(56, 189, 248, 0.1)" },
+  modalTitle: { fontSize: 20, fontWeight: 800, color: "#fff", marginBottom: 24, textTransform: "uppercase", letterSpacing: 1, display: "flex", alignItems: "center", gap: 10 },
+  sectionTitle: { fontSize: 10, fontWeight: 800, color: "#3b9eff", marginBottom: 16, textTransform: "uppercase", letterSpacing: "0.14em" },
+  divider: { borderTop: "1px solid rgba(59,158,255,0.08)", margin: "24px 0" },
+  tag: { display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(59,158,255,0.07)", color: "#3b9eff", border: "1px solid rgba(59,158,255,0.18)", borderRadius: 8, padding: "4px 10px", fontSize: 10, fontWeight: 700, marginRight: 6, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" },
   eventCard: (severity) => ({
     padding: "16px 20px",
     borderRadius: 14,
     background: severity === "critical" ? "rgba(239, 68, 68, 0.08)" : "rgba(15, 23, 42, 0.5)",
-    border: `1px solid ${severity === "critical" ? "rgba(239, 68, 68, 0.3)" : "rgba(56, 189, 248, 0.15)"}`,
+    border: `1px solid ${severity === "critical" ? "rgba(239, 68, 68, 0.25)" : "rgba(59,158,255,0.10)"}`,
     marginBottom: 12,
     display: "flex",
     gap: 16,
     alignItems: "center",
     transition: "transform 0.2s ease, box-shadow 0.2s ease",
-    boxShadow: severity === "critical" ? "0 0 15px rgba(239, 68, 68, 0.15)" : "none",
+    boxShadow: "none",
     cursor: "default"
   }),
 };
 
 // ── Components ────────────────────────────────────────────────
-function Bar({ value, color = "#38bdf8" }) {
+function Bar({ value, color = "#3b9eff" }) {
   const p = Math.min(value || 0, 100);
   return (
     <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.05)", position: "relative", overflow: "hidden", marginTop: 4 }}>
@@ -574,7 +555,7 @@ function AuthPage({ onLogin }) {
 
   const updateApi = () => {
     if (tempApi && tempApi.length > 5) {
-      localStorage.setItem("NEXUS_API_URL", tempApi);
+      localStorage.setItem("ETI_API_URL", tempApi);
       window.location.reload();
     }
   };
@@ -634,7 +615,7 @@ function AuthPage({ onLogin }) {
     finally { setLoading(false); }
   };
 
-  if (!step && !err) return <div style={{ ...S.app, alignItems: "center", justifyContent: "center", color: "#38bdf8", fontFamily: 'Rajdhani', fontSize: 20 }}>Carregando...</div>;
+  if (!step && !err) return <div style={{ ...S.app, alignItems: "center", justifyContent: "center", color: "#3b9eff", fontFamily: 'Rajdhani', fontSize: 20 }}>Carregando...</div>;
 
   return (
     <div style={{ ...S.app, alignItems: "center", justifyContent: "center" }}>
@@ -644,11 +625,11 @@ function AuthPage({ onLogin }) {
         maxWidth: 380, 
         textAlign: "center", 
         padding: window.innerWidth < 768 ? "30px 20px" : 40,
-        border: "1px solid rgba(56, 189, 248, 0.3)",
-        boxShadow: "0 0 50px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.1)"
+        border: "1px solid rgba(59,158,255,0.18)",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.45)"
       }}>
         <div style={{ fontSize: 42, marginBottom: 16, display: 'flex', justifyContent: 'center' }}>
-          <FuturisticLogo />
+          <LogoMark size={52} />
         </div>
         <div style={{ ...S.logoTitle, fontSize: 28, marginBottom: 4 }}>ETI SENTINEL</div>
         <div style={{ ...S.logoSub, fontSize: 12, marginBottom: 32 }}>MONITORAMENTO INTELIGENTE</div>
@@ -670,7 +651,7 @@ function AuthPage({ onLogin }) {
           </div>
         )}
         
-        {err && <div style={{ color: "#ff0055", fontSize: 12, marginBottom: 16, fontWeight: 600, background: 'rgba(255,0,85,0.1)', padding: 10, borderRadius: 8 }}>⚠️ {err}</div>}
+        {err && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 16, fontWeight: 700, background: 'rgba(239,68,68,0.10)', padding: 10, borderRadius: 10, border: '1px solid rgba(239,68,68,0.18)' }}>⚠️ {err}</div>}
         
         {step && (
           <button style={{ ...S.btn("primary"), width: "100%", marginTop: 10, height: 45 }} onClick={submit} disabled={loading}>
@@ -853,12 +834,12 @@ function ClientsPage() {
           <div style={S.pageTitle}>🏢 Clientes</div>
           <div style={S.pageSub}>Gerenciar clientes — {clients.length} cadastrado(s)</div>
         </div>
-        <button style={{ ...S.btn("primary"), boxShadow: "0 0 15px rgba(56,189,248,0.4)" }} onClick={() => setModal("new")}>+ Novo Cliente</button>
+        <button style={{ ...S.btn("primary") }} onClick={() => setModal("new")}>+ Novo Cliente</button>
       </div>
 
-      <div style={{ ...S.card, marginBottom: 24, display: "flex", gap: 10, background: "rgba(10, 15, 26, 0.4)", border: "1px solid rgba(56,189,248,0.1)" }}>
+      <div style={{ ...S.card, marginBottom: 24, display: "flex", gap: 10, background: "#0d1929", border: "1px solid rgba(59,158,255,0.08)" }}>
         <input style={{ ...S.input, maxWidth: 300 }} placeholder="🔍 Buscar cliente..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        <span style={{ fontSize: 12, color: "#38bdf8", alignSelf: "center", fontWeight: 600 }}>{filtered.length} resultado(s)</span>
+        <span style={{ fontSize: 12, color: "#3b9eff", alignSelf: "center", fontWeight: 700 }}>{filtered.length} resultado(s)</span>
       </div>
 
       <div style={{ ...S.card, overflowX: "auto", padding: 0 }}>
@@ -879,12 +860,12 @@ function ClientsPage() {
                 onMouseLeave={() => setHoverId(null)}
                 style={{
                   background: hoverId === c.id
-                    ? "rgba(56,189,248,0.06)"
+                    ? "rgba(59,158,255,0.06)"
                     : i % 2 === 0
                       ? "transparent"
-                      : "rgba(15,23,42,0.20)",
+                      : "rgba(11,21,37,0.35)",
                   transition: "background 0.2s, box-shadow 0.2s",
-                  boxShadow: hoverId === c.id ? "inset 0 0 0 1px rgba(56,189,248,0.18)" : "none",
+                  boxShadow: "none",
                 }}
               >
                 <td style={{ ...S.td, border: "none", padding: "16px 20px" }}>
@@ -893,7 +874,7 @@ function ClientsPage() {
                 </td>
                 <td style={{ ...S.td, border: "none" }}><span style={S.badge(planColor(c.plan))}>{c.plan}</span></td>
                 <td style={{ ...S.td, border: "none" }}><span style={S.badge(statusColor[c.status] || "#64748b")}>{statusLabel[c.status] || c.status}</span></td>
-                <td style={{ ...S.td, border: "none", color: "#38bdf8", fontWeight: 800, fontSize: 16 }}>{c.device_count || 0}</td>
+                <td style={{ ...S.td, border: "none", color: "#3b9eff", fontWeight: 800, fontSize: 16 }}>{c.device_count || 0}</td>
                 <td style={{ ...S.td, border: "none", color: "#22c55e", fontWeight: 800, fontSize: 16 }}>{c.online_count || 0}</td>
                 <td style={{ ...S.td, border: "none", color: c.offline_count > 0 ? "#ef4444" : "#3a5070", fontWeight: 800, fontSize: 16 }}>{c.offline_count || 0}</td>
                 <td style={{ ...S.td, border: "none", color: "#94a3b8", fontSize: 12 }}>{c.city || "—"}</td>
@@ -1111,8 +1092,8 @@ function DeviceModal({ device, clients, userRole, userClientId, onSave, onClose 
         <div style={S.fg}><label style={S.label}>Descrição</label><input style={S.input} value={form.description} onChange={(e) => set("description", e.target.value)} /></div>
         
         <div style={S.grid(2)}>
-          <div style={{...S.fg, border: "1px solid #38bdf833", padding: "10px", borderRadius: "8px", background: "rgba(56, 189, 248, 0.05)"}}>
-            <label style={{...S.label, color: "#38bdf8"}}>🆔 MAC Address</label>
+          <div style={{...S.fg, border: "1px solid rgba(59,158,255,0.18)", padding: "10px", borderRadius: "10px", background: "rgba(59,158,255,0.06)"}}>
+            <label style={{...S.label, color: "#3b9eff"}}>🆔 MAC Address</label>
             <input style={S.input} value={form.mac_address} onChange={(e) => set("mac_address", e.target.value)} placeholder="00:11:22:33:44:55" />
           </div>
           <div style={{...S.fg, border: "1px solid #a78bfa33", padding: "10px", borderRadius: "8px", background: "rgba(167, 139, 250, 0.05)"}}>
@@ -1332,7 +1313,7 @@ function DevicesPage({ userRole, userClientId }) {
         <button style={S.btn("primary")} onClick={() => setModal("new")}>+ Novo Dispositivo</button>
       </div>
 
-      <div style={{ ...S.card, marginBottom: 24, display: "flex", gap: 12, flexWrap: "wrap", background: "rgba(10, 15, 26, 0.4)", border: "1px solid rgba(56,189,248,0.1)" }}>
+      <div style={{ ...S.card, marginBottom: 24, display: "flex", gap: 12, flexWrap: "wrap", background: "#0d1929", border: "1px solid rgba(59,158,255,0.08)" }}>
         <input style={{ ...S.input, maxWidth: 200 }} placeholder="🔍 Buscar..." value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} />
         <select style={{ ...S.select, maxWidth: 150 }} value={filter.type} onChange={(e) => setFilter({ ...filter, type: e.target.value })}>
           <option value="">Todos os tipos</option>
@@ -1366,7 +1347,7 @@ function DevicesPage({ userRole, userClientId }) {
             ...S.card, 
             padding: 24, 
             border: `1px solid ${d.status === "online" ? "rgba(34, 197, 94, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
-            boxShadow: d.status === "online" ? "0 10px 30px rgba(34, 197, 94, 0.05)" : "0 10px 30px rgba(239, 68, 68, 0.1)"
+            boxShadow: "none"
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
               <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
@@ -1383,15 +1364,15 @@ function DevicesPage({ userRole, userClientId }) {
               </span>
             </div>
 
-            <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 12, padding: 16, marginBottom: 20, border: "1px solid rgba(255,255,255,0.03)" }}>
+            <div style={{ background: "rgba(11,21,37,0.65)", borderRadius: 12, padding: 16, marginBottom: 20, border: "1px solid rgba(59,158,255,0.08)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
                 <span style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>{d.ddns_address ? "DDNS" : "IP / VPN"}</span>
-                <span style={{ fontSize: 11, color: d.ddns_address ? "#38bdf8" : "#a78bfa", fontFamily: "monospace", fontWeight: 700 }}>{d.ddns_address || d.ip_address || "—"}</span>
+                <span style={{ fontSize: 11, color: d.ddns_address ? "#3b9eff" : "#a78bfa", fontFamily: "monospace", fontWeight: 700 }}>{d.ddns_address || d.ip_address || "—"}</span>
               </div>
               
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "10px", marginBottom: "10px" }}>
-                <div style={{ background: "rgba(56, 189, 248, 0.08)", padding: "8px", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.15)" }}>
-                  <span style={{ fontSize: "9px", color: "#38bdf8", display: "block", textTransform: "uppercase", fontWeight: 800, marginBottom: 2 }}>MAC Address</span>
+                <div style={{ background: "rgba(59,158,255,0.07)", padding: "8px", borderRadius: "8px", border: "1px solid rgba(59,158,255,0.14)" }}>
+                  <span style={{ fontSize: "9px", color: "#3b9eff", display: "block", textTransform: "uppercase", fontWeight: 800, marginBottom: 2 }}>MAC Address</span>
                   <span style={{ fontSize: "11px", color: "#fff", fontWeight: "700", fontFamily: "monospace" }}>{d.mac_address || "---"}</span>
                 </div>
                 <div style={{ background: "rgba(167, 139, 250, 0.08)", padding: "8px", borderRadius: "8px", border: "1px solid rgba(167, 139, 250, 0.15)" }}>
@@ -1405,10 +1386,10 @@ function DevicesPage({ userRole, userClientId }) {
                 <div style={{ background: "rgba(234, 179, 8, 0.08)", padding: "12px", borderRadius: "10px", border: "1px solid rgba(234, 179, 8, 0.2)", marginTop: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <span style={{ fontSize: 10, color: "#eab308", fontWeight: 800 }}>☀️ STATUS SOLAR</span>
-                    <span style={{ fontSize: 14, color: "#fff", fontWeight: 800, textShadow: "0 0 10px rgba(234,179,8,0.5)" }}>{d.battery_percent}%</span>
+                    <span style={{ fontSize: 14, color: "#fff", fontWeight: 800 }}>{d.battery_percent}%</span>
                   </div>
                   <div style={{ height: 6, background: "rgba(255,255,255,0.1)", borderRadius: 3, overflow: "hidden", marginBottom: 10 }}>
-                    <div style={{ height: "100%", width: `${d.battery_percent}%`, background: d.battery_percent > 20 ? "#22c55e" : "#ef4444", transition: "width 0.5s ease", boxShadow: "0 0 10px rgba(34,197,94,0.5)" }} />
+                    <div style={{ height: "100%", width: `${d.battery_percent}%`, background: d.battery_percent > 20 ? "#22c55e" : "#ef4444", transition: "width 0.5s ease" }} />
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <div>
@@ -1426,12 +1407,12 @@ function DevicesPage({ userRole, userClientId }) {
               {d.monitor_port > 0 && (
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, marginTop: 10 }}>
                   <span style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>PORTA</span>
-                  <span style={{ fontSize: 11, color: "#38bdf8", fontWeight: 800 }}>{d.monitor_port}</span>
+                  <span style={{ fontSize: 11, color: "#3b9eff", fontWeight: 800 }}>{d.monitor_port}</span>
                 </div>
               )}
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: d.monitor_port > 0 ? 0 : 10 }}>
                 <span style={{ fontSize: 10, color: "#64748b", fontWeight: 700 }}>LATÊNCIA</span>
-                <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 800, textShadow: "0 0 10px rgba(34,197,94,0.4)" }}>{d.last_latency ? `${Math.round(d.last_latency)}ms` : "—"}</span>
+                <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 800 }}>{d.last_latency ? `${Math.round(d.last_latency)}ms` : "—"}</span>
               </div>
             </div>
 
@@ -1451,8 +1432,8 @@ function DevicesPage({ userRole, userClientId }) {
                 }}>⋮</button>
                 <div id={`menu-${d.id}`} style={{ 
                   display: "none", position: "absolute", bottom: "100%", right: 0, 
-                  background: "rgba(15,23,42,0.95)", backdropFilter: "blur(10px)", border: "1px solid rgba(56,189,248,0.3)", 
-                  borderRadius: 12, padding: 8, zIndex: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.8)", marginBottom: 8
+                  background: "#0b1525", border: "1px solid rgba(59,158,255,0.18)", 
+                  borderRadius: 12, padding: 8, zIndex: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.45)", marginBottom: 8
                 }}>
                   <button style={{ ...S.btnSm(), display: "block", width: "100%", textAlign: "left", marginBottom: 6, border: "none", background: "transparent" }} onClick={() => regenToken(d.id)}>🔑 GERAR TOKEN</button>
                   <button style={{ ...S.btnSm("danger"), display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent" }} onClick={() => del(d.id)}>🗑️ EXCLUIR DEVICE</button>
@@ -1471,7 +1452,7 @@ function DevicesPage({ userRole, userClientId }) {
         <div style={S.modal} onClick={() => setTokenModal(null)}>
           <div style={{ ...S.modalBox, width: 380 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalTitle}>🔑 Token do Device</div>
-            <div style={{ ...S.input, wordBreak: "break-all", padding: 10, fontSize: 10, color: "#38bdf8", marginBottom: 14 }}>{tokenModal}</div>
+            <div style={{ ...S.input, wordBreak: "break-all", padding: 10, fontSize: 10, color: "#3b9eff", marginBottom: 14 }}>{tokenModal}</div>
             <button style={{ ...S.btn("primary"), width: "100%" }} onClick={() => { navigator.clipboard.writeText(tokenModal); setTokenModal(null); }}>📋 Copiar e Fechar</button>
           </div>
         </div>
@@ -1807,7 +1788,7 @@ function EventsPage({ userRole }) {
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-                  <span style={{ color: "#38bdf8", fontWeight: 600 }}>{e.device_name}</span>
+                  <span style={{ color: "#3b9eff", fontWeight: 700 }}>{e.device_name}</span>
                   {e.channel > 0 && ` • Canal ${e.channel}`}
                   {e.client_name && ` • ${e.client_name}`}
                 </div>
@@ -1846,7 +1827,7 @@ function AlertsPage({ userRole }) {
   });
 
   const TYPE_STYLE = {
-    offline:   { bg:"rgba(255, 0, 85, 0.06)", border:"rgba(255, 0, 85, 0.28)", icon:"🔴", label:"Offline",   color:"#ff0055", shadow:"0 0 14px rgba(255,0,85,0.18)" },
+    offline:   { bg:"rgba(239, 68, 68, 0.08)", border:"rgba(239, 68, 68, 0.25)", icon:"🔴", label:"Offline",   color:"#ef4444", shadow:"none" },
     threshold: { bg:"rgba(255, 174, 0, 0.06)", border:"rgba(255, 174, 0, 0.26)", icon:"🚨", label:"Threshold", color:"#ffae00", shadow:"0 0 14px rgba(255,174,0,0.14)" },
   };
 
@@ -1878,8 +1859,8 @@ function AlertsPage({ userRole }) {
 
       <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
         {[
-          ["all", "TODOS", "#38bdf8", counts.all],
-          ["offline", "OFFLINE", "#ff0055", counts.offline],
+          ["all", "TODOS", "#3b9eff", counts.all],
+          ["offline", "OFFLINE", "#ef4444", counts.offline],
           ["threshold", "THRESHOLD", "#ffae00", counts.threshold],
         ].map(([k, label, c, n]) => (
           <button
@@ -1897,13 +1878,12 @@ function AlertsPage({ userRole }) {
               display: "flex",
               alignItems: "center",
               gap: 10,
-              boxShadow: filter === k ? `0 0 14px ${c}33` : "none",
-              backdropFilter: "blur(10px)",
+              boxShadow: "none",
               letterSpacing: "0.8px",
               textTransform: "uppercase",
             }}
           >
-            <span style={{ width: 10, height: 10, borderRadius: 999, background: c, boxShadow: `0 0 10px ${c}99` }} />
+            <span style={{ width: 10, height: 10, borderRadius: 999, background: c }} />
             {label}
             <span style={{ background: filter === k ? `${c}44` : "rgba(255,255,255,0.10)", color: filter === k ? "#fff" : "#cbd5e1", borderRadius: 999, padding: "2px 10px", fontSize: 12, fontWeight: 900 }}>
               {n}
@@ -1924,8 +1904,8 @@ function AlertsPage({ userRole }) {
       </div>
 
       {filtered.length === 0 && (
-        <div style={{ textAlign: "center", padding: "70px 24px", background: "rgba(15,15,25,0.35)", borderRadius: 24, border: "1px solid rgba(255,255,255,0.06)" }}>
-          <div style={{ fontSize: 56, marginBottom: 14, filter: "drop-shadow(0 0 14px rgba(56,189,248,0.35))" }}>✅</div>
+        <div style={{ textAlign: "center", padding: "70px 24px", background: "#0d1929", borderRadius: 24, border: "1px solid rgba(59,158,255,0.08)" }}>
+          <div style={{ fontSize: 56, marginBottom: 14 }}>✅</div>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: 20 }}>Nenhum alerta encontrado</div>
           <div style={{ color: "#94a3b8", fontSize: 14, marginTop: 6 }}>Sistema operando normalmente.</div>
         </div>
@@ -1952,21 +1932,20 @@ function AlertsPage({ userRole }) {
                 gap: 18,
                 flexWrap: "wrap",
                 boxShadow: t.shadow,
-                backdropFilter: "blur(12px)",
               }}
             >
-              <div style={{ fontSize: 28, flexShrink: 0, filter: `drop-shadow(0 0 8px ${t.color})` }}>{t.icon}</div>
+              <div style={{ fontSize: 28, flexShrink: 0 }}>{t.icon}</div>
 
               <div style={{ flex: 1, minWidth: 260 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 16, fontWeight: 900, color: t.color, letterSpacing: "0.6px", textShadow: `0 0 8px ${t.color}66` }}>
+                  <span style={{ fontSize: 16, fontWeight: 900, color: t.color, letterSpacing: "0.6px" }}>
                     {a.trigger_name || (a.alert_type === "offline" ? "DEVICE OFFLINE" : "ALERT TRIGGERED")}
                   </span>
                   <span style={{ fontSize: 11, fontWeight: 900, background: `${t.color}20`, color: t.color, borderRadius: 999, padding: "4px 10px", border: `1px solid ${t.color}40`, textTransform: "uppercase" }}>
                     {t.label}
                   </span>
                   {userRole === "superadmin" && (
-                    <span style={{ fontSize: 11, fontWeight: 800, background: "rgba(56,189,248,0.12)", color: "#38bdf8", borderRadius: 999, padding: "4px 10px", border: "1px solid rgba(56,189,248,0.28)" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, background: "rgba(59,158,255,0.10)", color: "#3b9eff", borderRadius: 999, padding: "4px 10px", border: "1px solid rgba(59,158,255,0.20)" }}>
                       {a.client_name || "—"}
                     </span>
                   )}
@@ -2078,12 +2057,12 @@ function TriggersPage({ userRole }) {
           <tbody>
             {triggers.length === 0 && <tr><td colSpan={6} style={{ ...S.td, textAlign: "center", color: "#3a5070", padding: 40 }}>Nenhum trigger configurado</td></tr>}
             {triggers.map((t, i) => (
-              <tr key={t.id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(15,23,42,0.2)", transition: "background 0.2s", ":hover": { background: "rgba(56,189,248,0.05)" } }}>
+              <tr key={t.id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(11,21,37,0.35)" }}>
                 <td style={{ ...S.td, border: "none", padding: "16px 20px" }}><span style={S.badge(t.enabled?"#22c55e":"#4a6080")}>{t.enabled?"● ativo":"○ inativo"}</span></td>
                 <td style={{ ...S.td, border: "none", fontWeight: 700, color: "#f1f5f9", fontSize: 14 }}>{t.name}</td>
                 <td style={{ ...S.td, border: "none", color: "#cbd5e1" }}>{EXPRESSIONS.find((e) => e.value===t.expression)?.label||t.expression}</td>
                 <td style={{ ...S.td, border: "none", color: "#f59e0b", fontWeight: 800, fontSize: 15 }}>{t.threshold}</td>
-                {userRole === "superadmin" && <td style={{ ...S.td, border: "none" }}><span style={{ fontSize: 11, color: "#38bdf8", fontWeight: 600 }}>{clients.find((c) => c.id===t.client_id)?.name||"Todos"}</span></td>}
+                {userRole === "superadmin" && <td style={{ ...S.td, border: "none" }}><span style={{ fontSize: 11, color: "#3b9eff", fontWeight: 700 }}>{clients.find((c) => c.id===t.client_id)?.name||"Todos"}</span></td>}
                 <td style={{ ...S.td, border: "none" }}>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button style={S.btnSm(t.enabled ? "ghost" : "primary")} onClick={() => toggle(t)}>{t.enabled?"⏸":"▶️"}</button>
@@ -2118,7 +2097,7 @@ function TriggersPage({ userRole }) {
                 </select>
               </div>
             )}
-            <div style={S.fg}><label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#cbd5e1", cursor: "pointer", fontWeight: 600 }}><input type="checkbox" style={{ accentColor: "#38bdf8", transform: "scale(1.2)" }} checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} /> Trigger ativo</label></div>
+            <div style={S.fg}><label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#b8cfe8", cursor: "pointer", fontWeight: 700 }}><input type="checkbox" style={{ accentColor: "#3b9eff", transform: "scale(1.2)" }} checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} /> Trigger ativo</label></div>
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
               <button style={S.btn("ghost")} onClick={() => setModal(null)}>Cancelar</button>
               <button style={S.btn("primary")} onClick={save}>Salvar</button>
@@ -2410,7 +2389,7 @@ function SolarPage({ userRole }) {
       <div style={S.grid(4)}>
         {[
           { label: "Inversores", value: summary.total_inverters, color: "#f59e0b", suffix: "" },
-          { label: "Potência Atual", value: (summary.total_power_w/1000).toFixed(2), color: "#38bdf8", suffix: " kW" },
+          { label: "Potência Atual", value: (summary.total_power_w/1000).toFixed(2), color: "#3b9eff", suffix: " kW" },
           { label: "Energia Hoje", value: (summary.energy_today_kwh||0).toFixed(2), color: "#22c55e", suffix: " kWh" },
           { label: "Receita Hoje", value: `R$ ${(summary.revenue_today||0).toFixed(2)}`, color: "#a78bfa", suffix: "" },
         ].map((s) => (
@@ -2480,12 +2459,12 @@ function SolarPage({ userRole }) {
 
               {inv.location && <div style={{ fontSize: 10, color: "#3a5070", marginBottom: 10 }}>📍 {inv.location}</div>}
               {userRole === "superadmin" && inv.client_name && (
-                <div style={{ fontSize: 10, color: "#38bdf8", marginBottom: 10 }}>🏢 {inv.client_name}</div>
+                <div style={{ fontSize: 10, color: "#3b9eff", marginBottom: 10 }}>🏢 {inv.client_name}</div>
               )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
                 {[
-                  { label: "Potência", value: `${power.toFixed(2)} kW`, color: "#38bdf8", icon: "⚡" },
+                  { label: "Potência", value: `${power.toFixed(2)} kW`, color: "#3b9eff", icon: "⚡" },
                   { label: "Hoje", value: `${energy.toFixed(2)} kWh`, color: "#22c55e", icon: "☀️" },
                   { label: "Receita Hoje", value: `R$ ${revenue.toFixed(2)}`, color: "#a78bfa", icon: "💰" },
                   { label: "Total", value: `${totalEnergy.toFixed(0)} kWh`, color: "#f59e0b", icon: "📊" },
@@ -2627,7 +2606,6 @@ function NexusApp() {
             position: "fixed",
             inset: 0,
             background: "rgba(0,0,0,0.5)",
-            backdropFilter: "blur(2px)",
             zIndex: 1000
           }}
         />
@@ -2636,7 +2614,7 @@ function NexusApp() {
       <aside style={sidebarStyle}>
         <div style={S.logo}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
-            <div style={{ filter: 'drop-shadow(0 0 14px rgba(59,158,255,0.65))', flexShrink: 0 }}>
+            <div style={{ flexShrink: 0 }}>
               <LogoMark size={52} />
             </div>
             <div>
@@ -2649,7 +2627,7 @@ function NexusApp() {
           </div>
 
           <div style={{ background: 'rgba(59,158,255,0.07)', border: '1px solid rgba(59,158,255,0.18)', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#1a7fff,#004fa3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#fff', fontWeight: 800, boxShadow: '0 0 12px rgba(59,158,255,0.45)', flexShrink: 0 }}>S</div>
+            <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#1a7fff,#004fa3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#fff', fontWeight: 800, flexShrink: 0 }}>S</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#3b9eff', letterSpacing: '0.04em' }}>{isSuperAdmin ? 'Superadmin' : 'Cliente'}</div>
               <div style={{ fontSize: 9, color: '#2a5070', letterSpacing: '0.06em' }}>v1.0.3</div>
@@ -2697,14 +2675,13 @@ function NexusApp() {
               top: 15,
               left: 15,
               zIndex: 999,
-              background: "rgba(10, 15, 26, 0.8)",
-              border: "1px solid rgba(56, 189, 248, 0.3)",
-              color: "#38bdf8",
+              background: "rgba(11, 21, 37, 0.92)",
+              border: "1px solid rgba(59, 158, 255, 0.18)",
+              color: "#3b9eff",
               padding: "8px 12px",
               borderRadius: 8,
               fontSize: 18,
-              backdropFilter: "blur(8px)",
-              boxShadow: "0 0 15px rgba(56, 189, 248, 0.2)"
+              boxShadow: "none"
             }}
           >
             <Menu size={18} />

@@ -2,14 +2,14 @@
 
 ![ETI SENTINEL](./eti-sentinel-lockup.svg)
 
-Sistema de monitoramento de infraestrutura moderno, com **Layout Futurista**, alta performance e pronto para rodar 24/7.
+Sistema de monitoramento de infraestrutura moderno, com painel limpo, alta performance e pronto para rodar 24/7.
 
-## ✨ Destaques do Layout Futurista
-- **Glassmorphism**: Efeito de vidro fosco em todos os cards e modais.
-- **Neon Glow**: Cores vibrantes (Cyan, Purple, Pink) com brilho neon para status.
-- **Background Animado**: Grade tecnológica e scanlines para imersão total.
-- **Typography**: Fontes modernas (Rajdhani & JetBrains Mono) para leitura técnica.
-- **Real-time**: Atualização instantânea via WebSockets.
+## ✨ Destaques do Layout
+- **Sidebar fixa** com navegação rápida.
+- **KPIs** (clientes, total, online/offline, alertas) no topo.
+- **Seções** de saúde da rede, devices por tipo e alertas recentes.
+- **Tempo real** via WebSocket (quando configurado).
+- **Tipografia**: Rajdhani e Exo 2.
 
 ## 🚀 Deploy em 1-Clique no Railway
 Este projeto está otimizado para o **Railway.app**. Veja o guia completo em [DEPLOY-RAILWAY.md](DEPLOY-RAILWAY.md).
