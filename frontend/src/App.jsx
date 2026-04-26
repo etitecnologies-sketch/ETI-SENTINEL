@@ -1,4 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, Component } from 'react';
+import { io } from 'socket.io-client';
+import {
+  LayoutDashboard,
+  Users,
+  Server,
+  Zap,
+  Bell,
+  ClipboardList,
+  Sun,
+  RefreshCw,
+  LogOut,
+  Menu,
+} from 'lucide-react';
 
 // Error Boundary para evitar tela branca total
 class ErrorBoundary extends Component {
@@ -88,6 +101,117 @@ const FuturisticLogo = ({ size = 42 }) => (
   />
 );
 
+function LogoMark({ size = 52 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 110" fill="none">
+      <defs>
+        <linearGradient id="sg" x1="0" y1="0" x2="100" y2="110" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#1e3a5f" />
+          <stop offset="100%" stopColor="#0a1628" />
+        </linearGradient>
+        <linearGradient id="bg2" x1="0" y1="0" x2="100" y2="110" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#60c8ff" />
+          <stop offset="50%" stopColor="#3b9eff" />
+          <stop offset="100%" stopColor="#0069cc" />
+        </linearGradient>
+        <linearGradient id="eg" x1="30" y1="40" x2="70" y2="70" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#60c8ff" />
+          <stop offset="100%" stopColor="#1a7fff" />
+        </linearGradient>
+        <filter id="gf">
+          <feGaussianBlur stdDeviation="2" result="b" />
+          <feMerge>
+            <feMergeNode in="b" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <path d="M50 4 L90 20 L90 58 Q90 88 50 106 Q10 88 10 58 L10 20 Z" fill="url(#sg)" />
+      <path
+        d="M50 4 L90 20 L90 58 Q90 88 50 106 Q10 88 10 58 L10 20 Z"
+        fill="none"
+        stroke="url(#bg2)"
+        strokeWidth="3"
+        filter="url(#gf)"
+      />
+      <line x1="50" y1="10" x2="50" y2="100" stroke="#3b9eff" strokeWidth="0.8" opacity="0.5" />
+      <circle cx="65" cy="30" r="1.5" fill="#00c9a7" opacity="0.8" />
+      <circle cx="72" cy="38" r="1.5" fill="#00c9a7" opacity="0.8" />
+      <circle cx="68" cy="46" r="1.5" fill="#00c9a7" opacity="0.6" />
+      <line x1="65" y1="30" x2="72" y2="38" stroke="#00c9a7" strokeWidth="0.8" opacity="0.5" />
+      <line x1="72" y1="38" x2="68" y2="46" stroke="#00c9a7" strokeWidth="0.8" opacity="0.5" />
+      <ellipse cx="50" cy="57" rx="22" ry="13" fill="none" stroke="url(#eg)" strokeWidth="2" filter="url(#gf)" />
+      <path d="M28 57 Q50 38 72 57 Q50 76 28 57 Z" fill="#0d2040" opacity="0.7" />
+      <circle cx="50" cy="57" r="9" fill="none" stroke="#3b9eff" strokeWidth="1.5" />
+      <circle cx="50" cy="57" r="6" fill="url(#eg)" opacity="0.9" />
+      <circle cx="50" cy="57" r="3.5" fill="#0a1628" />
+      <circle cx="48" cy="55" r="1.2" fill="#fff" opacity="0.8" />
+    </svg>
+  );
+}
+
+function PulsingDot({ color }) {
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', width: 10, height: 10, flexShrink: 0 }}>
+      <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: color, opacity: 0.4, animation: 'eti-ping 1.8s ease infinite' }} />
+      <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, display: 'inline-block' }} />
+    </span>
+  );
+}
+
+function StatusBadge({ status }) {
+  const m = {
+    ok: { bg: 'rgba(0,201,167,.1)', text: '#00c9a7', border: 'rgba(0,201,167,.3)', label: 'Online' },
+    warning: { bg: 'rgba(245,158,11,.1)', text: '#f59e0b', border: 'rgba(245,158,11,.3)', label: 'Atenção' },
+    critical: { bg: 'rgba(239,68,68,.1)', text: '#ef4444', border: 'rgba(239,68,68,.3)', label: 'Crítico' },
+  };
+  const s = m[status] || m.ok;
+  return (
+    <span
+      style={{
+        background: s.bg,
+        color: s.text,
+        border: `1px solid ${s.border}`,
+        fontSize: 11,
+        fontWeight: 700,
+        padding: '3px 10px',
+        borderRadius: 999,
+        letterSpacing: '0.04em',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+function MiniBar({ value, color }) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const c = v > 85 ? '#ef4444' : v > 60 ? '#f59e0b' : color;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 120 }}>
+      <div style={{ flex: 1, height: 5, background: 'rgba(255,255,255,0.06)', borderRadius: 99, overflow: 'hidden' }}>
+        <div style={{ width: `${v}%`, height: '100%', background: c, borderRadius: 99, boxShadow: `0 0 6px ${c}80` }} />
+      </div>
+      <span style={{ fontSize: 11, color: '#4a7fa8', width: 34, textAlign: 'right' }}>{v}%</span>
+    </div>
+  );
+}
+
+function timeAgoPtBR(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const ms = Date.now() - d.getTime();
+  if (!Number.isFinite(ms)) return '—';
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s atrás`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min atrás`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h atrás`;
+  const days = Math.floor(h / 24);
+  return `${days}d atrás`;
+}
+
 const API = getInitialAPI().replace(/\/$/, "");
 
 console.log("🚀 DEBUG API URL:", `|${API}|`); // O pipe | ajuda a ver se tem espaço sobrando
@@ -174,50 +298,58 @@ const planColor   = (p) => PLANS.find((x) => x.value === p)?.color || "#64748b";
 const S = {
   app: { 
     minHeight: "100vh", 
-    background: "transparent", 
-    color: "#e2e8f0", 
-    fontFamily: "'Rajdhani', sans-serif", 
+    background: "#070d18", 
+    color: "#e2eaf5", 
+    fontFamily: "'Rajdhani','Segoe UI',sans-serif", 
     display: "flex",
     position: "relative"
   },
   sidebar: { 
-    width: 240, 
-    background: "rgba(5, 5, 10, 0.8)", 
-    backdropFilter: "blur(12px)",
-    borderRight: "1px solid rgba(56, 189, 248, 0.2)", 
+    width: 248, 
+    background: "#0b1525", 
+    borderRight: "1px solid rgba(59,158,255,0.1)", 
     display: "flex", 
     flexDirection: "column", 
-    padding: "20px 0", 
+    padding: 0, 
     flexShrink: 0,
-    boxShadow: "10px 0 30px rgba(0,0,0,0.5)"
+    boxShadow: "10px 0 30px rgba(0,0,0,0.45)"
   },
-  logo: { padding: "0 24px 24px", borderBottom: "1px solid rgba(56, 189, 248, 0.1)", marginBottom: 12 },
+  logo: { padding: "28px 20px 22px", borderBottom: "1px solid rgba(59,158,255,0.08)", background: "linear-gradient(180deg,rgba(59,158,255,0.05) 0%,transparent 100%)" },
   logoTitle: { 
-    fontSize: 22, 
-    fontWeight: 700, 
-    color: "#38bdf8", 
-    letterSpacing: 2,
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#3b9eff",
+    letterSpacing: "0.07em",
+    lineHeight: 1.1,
     textTransform: "uppercase",
-    textShadow: "0 0 10px rgba(56, 189, 248, 0.5)"
+    fontFamily: "'Exo 2',sans-serif",
+    textShadow: "0 0 16px rgba(59,158,255,0.6)"
   },
-  logoSub: { fontSize: 10, color: "#3a5070", marginTop: 2, letterSpacing: 1 },
-  navSection: { fontSize: 10, color: "#4a6080", padding: "16px 24px 8px", textTransform: "uppercase", letterSpacing: 2, fontWeight: 600 },
+  logoSub: { fontSize: 9, color: "#2a5070", fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 4 },
+  navSection: { fontSize: 9, color: "#1e3a5a", fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", padding: "0 10px", margin: "18px 0 8px" },
   navItem: (a) => ({ 
-    display: "flex", 
-    alignItems: "center", 
-    gap: 12, 
-    padding: "12px 24px", 
-    cursor: "pointer", 
-    color: a ? "#fff" : "#4a6080", 
-    background: a ? "linear-gradient(90deg, rgba(56,189,248,0.15) 0%, transparent 100%)" : "transparent", 
-    borderLeft: a ? "3px solid #38bdf8" : "3px solid transparent", 
-    fontSize: 14, 
-    fontWeight: a ? 600 : 500, 
-    transition: "all 0.3s ease", 
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: a ? "1px solid rgba(59,158,255,0.25)" : "1px solid transparent",
+    background: a ? "rgba(59,158,255,0.09)" : "transparent",
+    color: a ? "#3b9eff" : "#3a5c7a",
+    fontWeight: a ? 700 : 500,
+    fontSize: 14,
+    fontFamily: "'Rajdhani',sans-serif",
+    letterSpacing: "0.04em",
+    marginBottom: 2,
+    textAlign: "left",
+    position: "relative",
+    boxShadow: a ? "0 0 14px rgba(59,158,255,0.06)" : "none",
+    cursor: "pointer",
     userSelect: "none",
-    textShadow: a ? "0 0 8px rgba(56, 189, 248, 0.5)" : "none"
+    transition: "background 0.15s ease, border-color 0.15s ease, color 0.15s ease"
   }),
-  main: { flex: 1, overflow: "auto", padding: "30px 40px", background: "rgba(0,0,0,0.2)" },
+  main: { flex: 1, overflow: "auto", padding: "32px 32px", background: "#070d18" },
   pageTitle: { 
     fontSize: 28, 
     fontWeight: 700, 
@@ -234,17 +366,7 @@ const S = {
     gap: 20, 
     marginBottom: 20 
   }),
-  card: { 
-    background: "rgba(10, 15, 26, 0.6)", 
-    backdropFilter: "blur(12px)",
-    border: "1px solid rgba(56, 189, 248, 0.15)", 
-    borderRadius: 16, 
-    padding: 24,
-    boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-    position: "relative",
-    overflow: "hidden",
-    transition: "transform 0.2s ease, box-shadow 0.2s ease"
-  },
+  card: { background: "#0d1929", border: "1px solid rgba(59,158,255,0.1)", borderRadius: 12, padding: 22 },
   statCard: (c) => ({ 
     background: "rgba(10, 15, 26, 0.6)", 
     backdropFilter: "blur(12px)",
@@ -1365,6 +1487,7 @@ function Dashboard({ userRole }) {
   const [devices, setDevices] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [clients, setClients] = useState([]);
+  const [wsConnected, setWsConnected] = useState(false);
 
   const load = useCallback(() => {
     api("/stats").then(setStats).catch(() => {});
@@ -1375,188 +1498,260 @@ function Dashboard({ userRole }) {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 2000); // REFRESH CADA 2 SEGUNDOS (MODO REAL-TIME)
+    const t = setInterval(load, 8000);
     return () => clearInterval(t);
   }, [load]);
 
+  useEffect(() => {
+    const raw = import.meta.env.VITE_WS_URL || "";
+    const wsUrl = raw.replace(/["'`\s]/g, "").trim().replace(/\/$/, "");
+    if (!wsUrl) return;
+    const socket = io(wsUrl, {
+      transports: ["websocket", "polling"],
+      timeout: 20000,
+      reconnection: true,
+      reconnectionDelay: 1000,
+    });
+
+    const onConnect = () => setWsConnected(true);
+    const onDisconnect = () => setWsConnected(false);
+    const onMetric = (m) => {
+      const devId = m?.device_id;
+      if (!devId) return;
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === devId
+            ? {
+                ...d,
+                last_cpu: m.cpu ?? d.last_cpu,
+                last_memory: m.memory ?? d.last_memory,
+                last_latency: m.latency_ms ?? d.last_latency,
+                last_seen: m.time ?? d.last_seen,
+                status: m.status ?? d.status,
+              }
+            : d
+        )
+      );
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("metric:all", onMetric);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("metric:all", onMetric);
+      socket.close();
+    };
+  }, []);
+
   const byType = DEVICE_TYPES.map((t) => ({ ...t, count: devices.filter((d) => d.device_type === t.value).length })).filter((t) => t.count > 0);
+  const totalDevices = Math.max(1, stats.devices || devices.length || 1);
+  const onlineRate = Math.round(((stats.online || 0) / Math.max(1, stats.devices || 1)) * 100);
+
+  const typeColor = (value) => {
+    if (value === "server") return "#3b9eff";
+    if (value === "router") return "#00c9a7";
+    if (value === "switch") return "#a78bfa";
+    if (value === "camera" || value === "nvr" || value === "dvr") return "#60c8ff";
+    return "#64748b";
+  };
 
   const statTiles = [
-    ...(userRole === "superadmin" ? [{ icon: "🏢", label: "Clientes", value: stats.clients, color: "#a78bfa" }] : []),
-    { icon: "🧩", label: "Total Devices", value: stats.devices, color: "#38bdf8" },
-    { icon: "🟢", label: "Online", value: stats.online, color: "#22c55e" },
-    { icon: "🔴", label: "Offline", value: stats.offline, color: "#ef4444" },
-    { icon: "🚨", label: "Alertas 24h", value: alerts.length, color: "#f59e0b" },
+    ...(userRole === "superadmin" ? [{ label: "Clientes", value: stats.clients, color: "#a78bfa", r: "167,139,250" }] : []),
+    { label: "Total Devices", value: stats.devices, color: "#3b9eff", r: "59,158,255" },
+    { label: "Online", value: stats.online, color: "#00c9a7", r: "0,201,167" },
+    { label: "Offline", value: stats.offline, color: "#ef4444", r: "239,68,68" },
+    { label: "Alertas 24h", value: alerts.length, color: "#f59e0b", r: "245,158,11" },
   ];
 
+  const recentAlerts = alerts.slice(0, 3).map((a) => {
+    const critical = a.alert_type === "offline";
+    const title = a.trigger_name || (a.expression || "").toUpperCase() || "ALERTA";
+    const host = a.device_name || a.host || "—";
+    const val = a.value != null ? String(a.value) : "—";
+    return {
+      id: a.id,
+      host,
+      tipo: title,
+      valor: val,
+      tempo: a.fired_at ? timeAgoPtBR(a.fired_at) : "—",
+      severity: critical ? "critical" : "warning",
+    };
+  });
+
+  const onlineDevices = devices
+    .filter((d) => d.status === "online")
+    .slice()
+    .sort((a, b) => (b.last_cpu || 0) - (a.last_cpu || 0))
+    .slice(0, 10)
+    .map((d) => {
+      const cpu = Math.round(Number(d.last_cpu) || 0);
+      const mem = Math.round(Number(d.last_memory) || 0);
+      const status = cpu > 85 || mem > 85 ? "critical" : cpu > 60 || mem > 60 ? "warning" : "ok";
+      return { nome: d.name, cliente: d.client_name || "—", cpu, mem, status };
+    });
+
   return (
-    <div style={{ padding: isMobile ? "0 5px" : 0 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
+    <div style={{ padding: isMobile ? '0 8px' : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <div style={S.pageTitle}>📊 Dashboard</div>
-          <div style={S.pageSub}>Visão geral — ETI SENTINEL</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <h1 style={{ fontFamily: "'Exo 2',sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: '0.06em', color: '#fff', textShadow: '0 0 30px rgba(59,158,255,0.15)' }}>DASHBOARD</h1>
+            <div style={{ height: 2, width: 48, background: 'linear-gradient(90deg,#3b9eff,transparent)', marginTop: 4 }} />
+          </div>
+          <p style={{ marginTop: 4, color: '#2a5070', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Visão geral em tempo real — ETI Sentinel</p>
         </div>
-        <button onClick={load} style={{ ...S.btn("ghost"), padding: "10px 16px", borderRadius: 12 }}>
-          ↻ Atualizar
+        <button
+          onClick={load}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'rgba(59,158,255,0.08)',
+            border: '1px solid rgba(59,158,255,0.28)',
+            color: '#3b9eff',
+            borderRadius: 8,
+            padding: '10px 20px',
+            fontWeight: 700,
+            fontSize: 13,
+            fontFamily: "'Rajdhani',sans-serif",
+            letterSpacing: '0.08em',
+            boxShadow: '0 0 18px rgba(59,158,255,0.08)',
+          }}
+        >
+          <RefreshCw size={16} />
+          ATUALIZAR
         </button>
       </div>
 
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : `repeat(${userRole === "superadmin" ? 5 : 4}, 1fr)`, 
-        gap: isMobile ? 10 : 20, 
-        marginBottom: 20 
-      }}>
-        {statTiles.map((s) => (
-          <div
-            key={s.label}
-            style={{
-              ...S.statCard(s.color),
-              padding: isMobile ? 12 : 20,
-              background: `radial-gradient(120% 120% at 10% 10%, ${s.color}12 0%, rgba(10, 15, 26, 0.62) 55%, rgba(10, 15, 26, 0.62) 100%)`,
-              border: `1px solid ${s.color}30`,
-              boxShadow: `0 0 22px ${s.color}12, 0 8px 30px rgba(0,0,0,0.35)`,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 12, background: `${s.color}18`, border: `1px solid ${s.color}33`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, boxShadow: `0 0 14px ${s.color}22` }}>
-                  {s.icon}
-                </div>
-                <div style={{ ...S.statLabel, fontSize: isMobile ? 9 : 11, marginTop: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {s.label}
-                </div>
-              </div>
-              <div style={{ ...S.statVal(s.color), fontSize: isMobile ? 24 : 34 }}>{s.value}</div>
-            </div>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : `repeat(${userRole === 'superadmin' ? 5 : 4},1fr)`, gap: 12, marginBottom: 20 }}>
+        {statTiles.map((c) => (
+          <div key={c.label} style={{ background: '#0d1929', border: `1px solid rgba(${c.r},0.15)`, borderRadius: 12, padding: isMobile ? '14px 14px' : '18px 18px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', background: c.color, opacity: 0.05, filter: 'blur(18px)' }} />
+            <div style={{ fontSize: 9, fontWeight: 700, color: '#1e3a5a', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 12 }}>{c.label}</div>
+            <div style={{ fontSize: isMobile ? 30 : 36, fontWeight: 800, color: c.color, fontFamily: "'Exo 2',sans-serif", letterSpacing: '-0.02em', textShadow: `0 0 20px rgba(${c.r},0.35)` }}>{c.value}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: isMobile ? "1fr" : `repeat(${userRole === "superadmin" ? 3 : 2}, 1fr)`, 
-        gap: 20, 
-        marginBottom: 20 
-      }}>
-        <div style={S.card}>
-          <div style={S.sectionTitle}>Devices por Tipo</div>
-          {byType.length === 0 && <div style={{ color: "#3a5070", fontSize: 11 }}>Nenhum device</div>}
-          {byType.map((t) => (
-            <div key={t.value} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: 12 }}>{t.icon} {t.label}</span>
-              <span style={S.badge("#38bdf8")}>{t.count}</span>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.1fr 1.1fr', gap: 12, marginBottom: 12 }}>
+        <div style={{ background: '#0d1929', border: '1px solid rgba(59,158,255,0.1)', borderRadius: 12, padding: 22 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#3b9eff', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 18 }}>Saúde da Rede</div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+            <div style={{ position: 'relative', width: 110, height: 110 }}>
+              <svg viewBox="0 0 110 110" style={{ width: '100%', transform: 'rotate(-90deg)' }}>
+                <defs>
+                  <filter id="eti-gf2">
+                    <feGaussianBlur stdDeviation="3" result="b" />
+                    <feMerge>
+                      <feMergeNode in="b" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                </defs>
+                <circle cx="55" cy="55" r="44" fill="none" stroke="rgba(59,158,255,0.08)" strokeWidth="11" />
+                <circle
+                  cx="55"
+                  cy="55"
+                  r="44"
+                  fill="none"
+                  stroke="#00c9a7"
+                  strokeWidth="11"
+                  strokeDasharray={`${Math.round(onlineRate * 2.764)} 276.4`}
+                  strokeLinecap="round"
+                  filter="url(#eti-gf2)"
+                />
+              </svg>
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: 26, fontWeight: 800, color: '#00c9a7', fontFamily: "'Exo 2',sans-serif", textShadow: '0 0 16px rgba(0,201,167,0.6)' }}>{onlineRate}%</span>
+                <span style={{ fontSize: 9, color: '#1e3a5a', letterSpacing: '0.1em' }}>ONLINE</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#00c9a7', fontFamily: "'Exo 2',sans-serif" }}>{stats.online}</div>
+              <div style={{ fontSize: 9, color: '#1e3a5a', letterSpacing: '0.1em' }}>ONLINE</div>
+            </div>
+            <div style={{ width: 1, background: 'rgba(59,158,255,0.08)' }} />
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#ef4444', fontFamily: "'Exo 2',sans-serif" }}>{stats.offline}</div>
+              <div style={{ fontSize: 9, color: '#1e3a5a', letterSpacing: '0.1em' }}>OFFLINE</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: '#0d1929', border: '1px solid rgba(59,158,255,0.1)', borderRadius: 12, padding: 22 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#3b9eff', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 18 }}>Devices por Tipo</div>
+          {byType.length === 0 && <div style={{ fontSize: 12, color: '#2a5070' }}>Nenhum device</div>}
+          {byType.map((d) => (
+            <div key={d.value} style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                <span style={{ fontSize: 13, color: '#5a7fa8', fontWeight: 500 }}>{d.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: typeColor(d.value) }}>{d.count}</span>
+              </div>
+              <div style={{ height: 5, background: 'rgba(255,255,255,0.04)', borderRadius: 99 }}>
+                <div style={{ width: `${(d.count / totalDevices) * 100}%`, height: '100%', background: typeColor(d.value), borderRadius: 99, boxShadow: `0 0 8px ${typeColor(d.value)}55` }} />
+              </div>
             </div>
           ))}
         </div>
 
-        {userRole === "superadmin" && (
-          <div style={S.card}>
-            <div style={S.sectionTitle}>Top Clientes</div>
-            {clients.slice(0, 6).map((c) => (
-              <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 11, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
-                  <div style={{ fontSize: 9, color: "#3a5070" }}>{c.city||"—"}</div>
-                </div>
-                <div style={{ display: "flex", gap: 5, alignItems: "center", marginLeft: 10 }}>
-                  <span style={S.badge("#22c55e")}>{c.online_count||0} on</span>
-                  {(c.offline_count||0) > 0 && <span style={S.badge("#ef4444")}>{c.offline_count} off</span>}
-                </div>
-              </div>
-            ))}
+        <div style={{ background: '#0d1929', border: '1px solid rgba(59,158,255,0.1)', borderRadius: 12, padding: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#3b9eff', letterSpacing: '0.14em', textTransform: 'uppercase' }}>Alertas Recentes</div>
+            <span style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)', fontSize: 9, fontWeight: 700, borderRadius: 999, padding: '2px 8px', letterSpacing: '0.08em' }}>{alerts.length} HOJE</span>
           </div>
-        )}
-
-      <div style={S.card}>
-        <div style={S.sectionTitle}>Alertas Recentes (24h)</div>
-        {alerts.slice(0, 8).length === 0 && <div style={{ color: "#3a5070", fontSize: 11 }}>Nenhum alerta</div>}
-        {alerts.slice(0, 8).map((a) => (
-          <div key={a.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.trigger_name || (a.expression || "").toUpperCase()}</span>
-              <span style={S.badge(a.alert_type==="offline"?"#ef4444":"#f59e0b")}>{a.alert_type==="offline"?"🔴 OFFLINE":"⚠️ AVISO"}</span>
-            </div>
-            <div style={{ fontSize: 10, color: "#38bdf8", marginTop: 4 }}>{a.device_name||a.host}</div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-              <span style={{ fontSize: 9, color: "#475569" }}>🕒 {new Date(a.fired_at).toLocaleString("pt-BR")}</span>
-              <span style={{ fontSize: 9, color: "#22c55e", fontWeight: 700 }}>{a.value != null ? `${a.value.toFixed(1)}ms` : ""}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-      </div>
-
-      <div style={S.card}>
-        <div style={S.sectionTitle}>Dispositivos em Tempo Real</div>
-        <div style={{ 
-          display: "grid", 
-          gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(240px, 1fr))", 
-          gap: 15 
-        }}>
-          {devices.filter((d) => d.status==="online").slice(0,12).map((d) => (
-            <div key={d.id} style={{ 
-              background: "rgba(10, 15, 26, 0.4)", 
-              border: "1px solid rgba(56, 189, 248, 0.15)", 
-              borderRadius: 14, 
-              padding: 14,
-              position: "relative",
-              boxShadow: "0 4px 15px rgba(0,0,0,0.2)"
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <div style={{ 
-                  width: 36, height: 36, borderRadius: 10, 
-                  background: "rgba(56, 189, 248, 0.1)", 
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 18,
-                  border: "1px solid rgba(56, 189, 248, 0.2)"
-                }}>
-                  {deviceIcon(d.device_type)}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
-                  <div style={{ fontSize: 9, color: "#38bdf8", fontWeight: 600 }}>{d.client_name||"—"}</div>
-                </div>
+          {recentAlerts.length === 0 && <div style={{ fontSize: 12, color: '#2a5070' }}>Nenhum alerta</div>}
+          {recentAlerts.map((a, i) => (
+            <div key={a.id || i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: i < recentAlerts.length - 1 ? '1px solid rgba(59,158,255,0.05)' : 'none' }}>
+              <PulsingDot color={a.severity === 'critical' ? '#ef4444' : '#f59e0b'} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#b8cfe8', letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.host}</div>
+                <div style={{ fontSize: 11, color: '#2a5070', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.tipo} · {a.valor}</div>
               </div>
-              
-              <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-                {d.last_cpu != null ? (
-                  <>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#64748b", marginBottom: 4 }}>
-                        <span>CPU</span><span style={{ color: "#38bdf8", fontWeight: 700 }}>{(d.last_cpu||0).toFixed(0)}%</span>
-                      </div>
-                      <Bar value={d.last_cpu} color="#38bdf8" />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#64748b", marginBottom: 4 }}>
-                        <span>RAM</span><span style={{ color: "#a78bfa", fontWeight: 700 }}>{(d.last_memory||0).toFixed(0)}%</span>
-                      </div>
-                      <Bar value={d.last_memory} color="#a78bfa" />
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ flex: 1, textAlign: "center", padding: "8px 0", background: "rgba(56, 189, 248, 0.05)", borderRadius: 8, border: "1px solid rgba(56, 189, 248, 0.1)" }}>
-                    <div style={{ fontSize: 10, color: "#38bdf8", fontWeight: 800 }}>MODO PUSH / AUTO</div>
-                    <div style={{ fontSize: 8, color: "#4a6080" }}>{d.mac_address || d.serial_number || "SINAL OK"}</div>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.03)" }}>
-                <div style={{ fontSize: 10, color: "#22c55e", fontWeight: 800, textShadow: "0 0 10px rgba(34, 197, 94, 0.4)" }}>● ONLINE</div>
-                <div style={{ textAlign: "right" }}>
-                   <div style={{ fontSize: 11, color: "#fff", fontWeight: 700 }}>{Math.round(d.last_latency||0)}<span style={{fontSize:8, marginLeft:2, color:"#4a6080"}}>ms</span></div>
-                   <div style={{ fontSize: 7, color: "#475569" }}>{new Date(d.last_seen).toLocaleTimeString("pt-BR")}</div>
-                </div>
-              </div>
+              <div style={{ fontSize: 10, color: '#1a3050', whiteSpace: 'nowrap' }}>{a.tempo}</div>
             </div>
           ))}
         </div>
-        {devices.filter((d) => d.status==="online").length === 0 && (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#3a5070", fontSize: 12 }}>
-            Aguardando dispositivos ficarem online...
+      </div>
+
+      <div style={{ background: '#0d1929', border: '1px solid rgba(59,158,255,0.1)', borderRadius: 12, padding: 22 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#3b9eff', letterSpacing: '0.14em', textTransform: 'uppercase' }}>Dispositivos em Tempo Real</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: wsConnected ? '#00c9a7' : '#f59e0b', fontWeight: 700, letterSpacing: '0.1em' }}>
+            <PulsingDot color={wsConnected ? '#00c9a7' : '#f59e0b'} />
+            {wsConnected ? 'AO VIVO' : 'SEM WS'}
           </div>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(59,158,255,0.08)' }}>
+                {["Dispositivo", "Cliente", "CPU", "Memória", "Status"].map((h) => (
+                  <th key={h} style={{ textAlign: 'left', fontSize: 9, fontWeight: 700, color: '#1e3a5a', textTransform: 'uppercase', letterSpacing: '0.14em', padding: '0 0 12px' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {onlineDevices.map((d, i) => (
+                <tr key={`${d.nome}-${i}`} style={{ borderBottom: '1px solid rgba(59,158,255,0.04)' }}>
+                  <td style={{ padding: '12px 0', fontSize: 14, fontWeight: 700, color: '#b8cfe8', letterSpacing: '0.04em', fontFamily: "'Exo 2',sans-serif" }}>{d.nome}</td>
+                  <td style={{ padding: '12px 0', fontSize: 12, color: '#2a5070' }}>{d.cliente}</td>
+                  <td style={{ padding: '12px 0' }}><MiniBar value={d.cpu} color="#3b9eff" /></td>
+                  <td style={{ padding: '12px 0' }}><MiniBar value={d.mem} color="#a78bfa" /></td>
+                  <td style={{ padding: '12px 0' }}><StatusBadge status={d.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {onlineDevices.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '26px 0', color: '#2a5070', fontSize: 12 }}>Aguardando dispositivos ficarem online...</div>
         )}
       </div>
     </div>
@@ -2373,23 +2568,22 @@ function NexusApp() {
   const isSuperAdmin = userRole === "superadmin";
 
   const NAV_SUPERADMIN = [
-    { section: "GERAL" },
-    { id: "dashboard", label: "Dashboard",  icon: "📊" },
-    { section: "GERENCIAR" },
-    { id: "clients",   label: "Clientes",   icon: "🏢" },
-    { id: "devices",   label: "Devices",    icon: "🖥️" },
-    { id: "triggers",  label: "Triggers",   icon: "⚡" },
-    { id: "alerts",    label: "Alertas",    icon: "🚨" },
-    { id: "events",    label: "Eventos",    icon: "🎬" },
-    { id: "solar", label: "Solar", icon: "☀️" },
+    { section: "MENU PRINCIPAL" },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "clients", label: "Clientes", icon: Users },
+    { id: "devices", label: "Devices", icon: Server },
+    { id: "triggers", label: "Triggers", icon: Zap },
+    { id: "alerts", label: "Alertas", icon: Bell },
+    { id: "events", label: "Eventos", icon: ClipboardList },
+    { id: "solar", label: "Solar", icon: Sun },
   ];
 
   const NAV_CLIENT = [
     { section: "MENU" },
-    { id: "dashboard", label: "Dashboard", icon: "📊" },
-    { id: "devices",   label: "Devices",   icon: "🖥️" },
-    { id: "alerts",    label: "Alertas",   icon: "🚨" },
-    { id: "events",    label: "Eventos",   icon: "🎬" },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "devices", label: "Devices", icon: Server },
+    { id: "alerts", label: "Alertas", icon: Bell },
+    { id: "events", label: "Eventos", icon: ClipboardList },
   ];
 
   const NAV = isSuperAdmin ? NAV_SUPERADMIN : NAV_CLIENT;
@@ -2411,37 +2605,19 @@ function NexusApp() {
     height: "100vh",
     transform: isMobile ? (sidebarOpen ? "translateX(0)" : "translateX(-100%)") : "none",
     transition: "transform 0.3s ease-in-out",
-    width: 240,
+    width: 248,
   };
 
   return (
     <div style={{...S.app, flexDirection: "row", overflow: "hidden"}}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
-        ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.2); border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.4); }
-        input[type=checkbox] { accent-color: #38bdf8; }
-        
-        @media (max-width: 768px) {
-          body { overflow: auto !important; }
-          .main-content { padding: 15px !important; }
-          .grid-responsive { grid-template-columns: 1fr !important; }
-        }
-
-        .glass {
-          background: rgba(255, 255, 255, 0.03);
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        @keyframes pulse {
-          0% { opacity: 0.6; }
-          50% { opacity: 1; }
-          100% { opacity: 0.6; }
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@700;800&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{background:#070d18;color:#e2eaf5;font-family:'Rajdhani','Segoe UI',sans-serif}
+        ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0b1525}::-webkit-scrollbar-thumb{background:#1e3a5f;border-radius:4px}
+        button{cursor:pointer}
+        @keyframes eti-ping{0%{transform:scale(1);opacity:.5}75%,100%{transform:scale(2.2);opacity:0}}
+        @media (max-width: 768px){.main-content{padding:70px 14px 20px !important}}
       `}</style>
 
       {isMobile && sidebarOpen && (
@@ -2457,34 +2633,62 @@ function NexusApp() {
         />
       )}
 
-      <div style={sidebarStyle}>
+      <aside style={sidebarStyle}>
         <div style={S.logo}>
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-            <FuturisticLogo />
-            <div style={S.logoTitle}>ETI SENTINEL</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+            <div style={{ filter: 'drop-shadow(0 0 14px rgba(59,158,255,0.65))', flexShrink: 0 }}>
+              <LogoMark size={52} />
+            </div>
+            <div>
+              <div style={S.logoTitle}>
+                <span style={{ color: '#b8cfe8' }}>ETI </span>
+                <span style={{ color: '#3b9eff' }}>SENTINEL</span>
+              </div>
+              <div style={S.logoSub}>Monitoramento Inteligente</div>
+            </div>
           </div>
-          <div style={{...S.logoSub, color: "#38bdf8", fontWeight: "bold"}}>🚀 v1.0.3 (CACHE FIXED)</div>
-          <div style={S.logoSub}>{isSuperAdmin ? "⚡ Superadmin" : "👤 Cliente"}</div>
+
+          <div style={{ background: 'rgba(59,158,255,0.07)', border: '1px solid rgba(59,158,255,0.18)', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#1a7fff,#004fa3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#fff', fontWeight: 800, boxShadow: '0 0 12px rgba(59,158,255,0.45)', flexShrink: 0 }}>S</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#3b9eff', letterSpacing: '0.04em' }}>{isSuperAdmin ? 'Superadmin' : 'Cliente'}</div>
+              <div style={{ fontSize: 9, color: '#2a5070', letterSpacing: '0.06em' }}>v1.0.3</div>
+            </div>
+            <PulsingDot color="#00c9a7" />
+          </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <nav style={{ padding: '18px 10px', flex: 1, overflowY: 'auto' }}>
           {NAV.map((n, i) =>
-            n.section
-              ? <div key={i} style={S.navSection}>{n.section}</div>
-              : <div key={n.id} style={S.navItem(page===n.id)} onClick={() => setPage(n.id)}>
-                  <span>{n.icon}</span><span>{n.label}</span>
-                </div>
+            n.section ? (
+              <div key={i} style={S.navSection}>{n.section}</div>
+            ) : (
+              <button key={n.id} onClick={() => setPage(n.id)} style={S.navItem(page === n.id)}>
+                {page === n.id && <span style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 20, background: '#3b9eff', borderRadius: '0 3px 3px 0', boxShadow: '0 0 8px #3b9eff' }} />}
+                <span style={{ width: 20, display: 'inline-flex', justifyContent: 'center', opacity: page === n.id ? 1 : 0.75 }}>
+                  <n.icon size={16} />
+                </span>
+                {n.label}
+              </button>
+            )
           )}
-        </div>
+        </nav>
 
-        <div style={{ marginTop: "auto", padding: "16px" }}>
-          <button style={{ ...S.btn("ghost"), width: "100%", fontSize: 10 }} onClick={() => { removeToken(); setAuthed(false); }}>
-            ⏻ Sair
+        <div style={{ padding: '14px 10px', borderTop: '1px solid rgba(59,158,255,0.07)' }}>
+          <button
+            onClick={() => {
+              removeToken();
+              setAuthed(false);
+            }}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.15)', background: 'rgba(239,68,68,0.05)', color: '#ef4444', fontWeight: 700, fontSize: 14, fontFamily: "'Rajdhani',sans-serif", letterSpacing: '0.04em' }}
+          >
+            <LogOut size={16} />
+            Sair
           </button>
         </div>
-      </div>
+      </aside>
 
-      <div style={{ ...S.main, padding: isMobile ? "70px 15px 20px" : "30px 40px" }} className="main-content">
+      <div style={{ ...S.main, padding: isMobile ? "70px 14px 20px" : "32px 32px" }} className="main-content">
         {isMobile && (
           <button
             onClick={() => setSidebarOpen(true)}
@@ -2503,7 +2707,7 @@ function NexusApp() {
               boxShadow: "0 0 15px rgba(56, 189, 248, 0.2)"
             }}
           >
-            ☰
+            <Menu size={18} />
           </button>
         )}
         {PAGES[page] || PAGES.dashboard}
