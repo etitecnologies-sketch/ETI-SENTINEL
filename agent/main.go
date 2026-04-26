@@ -205,7 +205,7 @@ func main() {
 	apiURL      := getEnv("INGEST_URL",    "http://ingest-api:3000/metrics")
 	deviceToken := getEnv("DEVICE_TOKEN",  "")
 	client := &http.Client{Timeout: 5 * time.Second}
-	log.Printf("PulseGuard Agent | host=%s | api=%s", host, apiURL)
+	log.Printf("ETI SENTINEL Agent | host=%s | api=%s", host, apiURL)
 
 	for {
 		cpu, _           := readCPU()

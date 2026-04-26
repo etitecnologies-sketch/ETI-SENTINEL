@@ -8,7 +8,7 @@ if [ -n "$TAILSCALE_AUTHKEY" ]; then
     (
       sleep 5
       echo "Autenticando no Tailscale (Processor) em background..."
-      tailscale --socket=/tmp/tailscaled.sock up --authkey=$TAILSCALE_AUTHKEY --hostname=nexuswatch-processor --accept-routes
+      tailscale --socket=/tmp/tailscaled.sock up --authkey=$TAILSCALE_AUTHKEY --hostname=eti-sentinel-processor --accept-routes
       echo "Processor Conectado à Rede Privada Tailscale!"
     ) &
 else

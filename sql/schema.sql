@@ -1,4 +1,10 @@
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS timescaledb;
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE 'TimescaleDB extension not available; continuing without hypertables/compression.';
+END $$;
 
 CREATE TABLE IF NOT EXISTS hosts (
     id         SERIAL PRIMARY KEY,
@@ -44,15 +50,33 @@ CREATE TABLE IF NOT EXISTS metrics (
     temperature     DOUBLE PRECISION NOT NULL DEFAULT 0
 );
 
-SELECT create_hypertable('metrics', 'time', if_not_exists => TRUE);
+DO $$
+BEGIN
+  PERFORM create_hypertable('metrics', 'time', if_not_exists => TRUE);
+EXCEPTION
+  WHEN undefined_function THEN
+    RAISE NOTICE 'create_hypertable() not available; continuing as plain Postgres table.';
+  WHEN OTHERS THEN
+    RAISE NOTICE 'Hypertable creation skipped due to missing TimescaleDB features.';
+END $$;
 CREATE INDEX IF NOT EXISTS idx_metrics_host_time ON metrics (host, time DESC);
 
-ALTER TABLE metrics SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'host'
-);
-SELECT add_compression_policy('metrics', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_retention_policy('metrics', INTERVAL '90 days', if_not_exists => TRUE);
+DO $$
+BEGIN
+  ALTER TABLE metrics SET (
+      timescaledb.compress,
+      timescaledb.compress_segmentby = 'host'
+  );
+  PERFORM add_compression_policy('metrics', INTERVAL '7 days', if_not_exists => TRUE);
+  PERFORM add_retention_policy('metrics', INTERVAL '90 days', if_not_exists => TRUE);
+EXCEPTION
+  WHEN undefined_object THEN
+    RAISE NOTICE 'Compression/retention policies not available; continuing without TimescaleDB policies.';
+  WHEN undefined_function THEN
+    RAISE NOTICE 'Compression/retention functions not available; continuing without policies.';
+  WHEN OTHERS THEN
+    RAISE NOTICE 'Compression/retention policies skipped due to missing TimescaleDB features.';
+END $$;
 
 CREATE TABLE IF NOT EXISTS triggers (
     id         SERIAL PRIMARY KEY,

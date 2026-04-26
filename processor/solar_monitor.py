@@ -5,7 +5,7 @@ import psycopg2
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_NAME     = "NexusWatch Pro Solar"
+APP_NAME     = "ETI SENTINEL Solar"
 DATABASE_URL = os.environ["DATABASE_URL"]
 TG_TOKEN     = os.getenv("TELEGRAM_TOKEN", "")
 TG_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -176,7 +176,7 @@ def check_solar_alerts(cur, inv, data, tg_tok, tg_cid):
                    f"💵 Receita total: <b>R$ {data.get('energy_total_kwh',0)*tariff:.2f}</b>"
                    f"{performance}\n"
                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                   f"🕐 {now_str()} #solar #nexuswatch")
+                   f"🕐 {now_str()} #solar #etisentinel")
             send_telegram(msg, tg_tok, tg_cid)
 
 # ════════════════════════════════════════════════════════════

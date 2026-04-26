@@ -1,8 +1,8 @@
 {
-  "name": "monitoring-frontend",
+  "name": "eti-sentinel-frontend",
   "version": "1.0.3",
   "type": "module",
-  "description": "React frontend for monitoring system dashboard",
+  "description": "ETI SENTINEL — Frontend do sistema de monitoramento inteligente",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

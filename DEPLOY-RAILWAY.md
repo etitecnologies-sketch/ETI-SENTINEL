@@ -1,11 +1,15 @@
 # Deploy no Railway (Modo Serviços Separados) 🚀
 
-Para o **NexusWatch Pro** rodar com máxima estabilidade 24/7, recomendamos criar serviços separados no Railway para cada parte do sistema.
+Para o **ETI SENTINEL** rodar com máxima estabilidade 24/7, recomendamos criar serviços separados no Railway para cada parte do sistema.
 
 ## 1. Banco de Dados (TimescaleDB)
 - **New** -> **Database** -> **PostgreSQL**.
 - O Railway adicionará o plugin TimescaleDB automaticamente se disponível ou use uma imagem Docker personalizada se preferir.
 - Anote a `DATABASE_URL`.
+
+### Importante: criar o schema
+- Execute o arquivo `sql/schema.sql` no seu banco (Railway -> Data/Query ou via `psql`).
+- O schema tenta usar TimescaleDB se estiver disponível, mas funciona também em PostgreSQL puro.
 
 ## 2. Ingest API (O Coração)
 - **New** -> **GitHub Repo** -> Selecione o repo.

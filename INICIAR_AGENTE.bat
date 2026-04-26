@@ -1,9 +1,9 @@
 @echo off
-TITLE NexusWatch Pro - Debug Agent
+TITLE ETI SENTINEL - Debug Agent
 SET INGEST_URL=https://monitoring-system-production-1e5a.up.railway.app/metrics
 
 echo ==========================================
-echo    NexusWatch Pro - Diagnostico do Agent
+echo    ETI SENTINEL - Diagnostico do Agent
 echo ==========================================
 echo.
 

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ETI SENTINEL">
+  <defs>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="0.55" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E5E7EB"/>
+      <stop offset="0.5" stop-color="#9CA3AF"/>
+      <stop offset="1" stop-color="#6B7280"/>
+    </linearGradient>
+    <radialGradient id="eyeGlow" cx="50%" cy="50%" r="60%">
+      <stop offset="0" stop-color="#67E8F9" stop-opacity="0.85"/>
+      <stop offset="0.35" stop-color="#38BDF8" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#0B1020" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="outerGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feColorMatrix in="b" type="matrix" values="0 0 0 0 0.13  0 0 0 0 0.83  0 0 0 0 0.93  0 0 0 0.75 0" result="c"/>
+      <feMerge>
+        <feMergeNode in="c"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="shieldClip">
+      <path d="M256 48c66 44 132 60 196 76v134c0 120-84 188-196 238C144 446 60 378 60 258V124c64-16 130-32 196-76z"/>
+    </clipPath>
+  </defs>
+
+  <rect width="512" height="512" fill="#050508"/>
+
+  <path d="M256 48c66 44 132 60 196 76v134c0 120-84 188-196 238C144 446 60 378 60 258V124c64-16 130-32 196-76z" fill="#0A0A10" stroke="url(#neon)" stroke-width="10" filter="url(#outerGlow)"/>
+
+  <g clip-path="url(#shieldClip)">
+    <path d="M256 66c56 38 112 52 166 66v126c0 104-72 164-166 206z" fill="#0B0E16"/>
+    <path d="M256 66v398c-94-42-166-102-166-206V132c54-14 110-28 166-66z" fill="#07080D"/>
+
+    <g stroke="url(#neon)" stroke-width="4" stroke-linecap="round" opacity="0.9">
+      <path d="M298 132h62v26"/>
+      <path d="M312 168h74v34"/>
+      <path d="M292 206h54v22h38"/>
+      <path d="M320 246h66v28"/>
+      <path d="M300 292h54v18h44"/>
+      <path d="M328 332h58v26"/>
+      <circle cx="360" cy="158" r="6" fill="#67E8F9"/>
+      <circle cx="386" cy="202" r="6" fill="#67E8F9"/>
+      <circle cx="396" cy="274" r="6" fill="#67E8F9"/>
+      <circle cx="402" cy="310" r="6" fill="#67E8F9"/>
+      <circle cx="382" cy="356" r="6" fill="#67E8F9"/>
+    </g>
+
+    <g>
+      <path d="M128 264c38-54 86-82 128-82s90 28 128 82c-38 54-86 82-128 82s-90-28-128-82z" fill="#0B1020" stroke="url(#neon)" stroke-width="6" filter="url(#outerGlow)"/>
+      <ellipse cx="256" cy="264" rx="58" ry="58" fill="url(#eyeGlow)"/>
+      <circle cx="256" cy="264" r="44" fill="#0B1020" stroke="url(#steel)" stroke-width="6" opacity="0.95"/>
+      <circle cx="256" cy="264" r="26" fill="#0B1020" stroke="url(#neon)" stroke-width="6" filter="url(#outerGlow)"/>
+      <circle cx="256" cy="264" r="10" fill="#67E8F9"/>
+      <path d="M238 238c10-10 26-14 38-10" fill="none" stroke="#E5E7EB" stroke-opacity="0.35" stroke-width="5" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>
+

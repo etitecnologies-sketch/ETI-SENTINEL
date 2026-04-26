@@ -32,6 +32,9 @@ yarn-error.log*
 Thumbs.db
 .env.local
 
+# Vercel
+.vercel/
+
 # Temporary files
 *.tmp
 *.temp

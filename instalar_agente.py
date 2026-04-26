@@ -1,5 +1,5 @@
 """
-NexusWatch Agent - Instalador Automatico
+ETI SENTINEL Agent - Instalador Automatico
 Execute com: python instalar_agente.py
 """
 import os, sys, subprocess
@@ -8,7 +8,7 @@ SERVER_URL = "https://monitoring-system-production-1e5a.up.railway.app/metrics"
 
 def print_header():
     print("=" * 50)
-    print("  NexusWatch Agent - Instalador")
+    print("  ETI SENTINEL Agent - Instalador")
     print("=" * 50)
     print()
 
@@ -22,7 +22,7 @@ def create_agent(cliente, token, url):
     code = (
         "import os, time, logging, requests, subprocess, socket\n\n"
         "logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')\n"
-        "logger = logging.getLogger('NexusWatch-" + cliente + "')\n\n"
+        "logger = logging.getLogger('ETI-SENTINEL-" + cliente + "')\n\n"
         "INGEST_URL   = '" + url + "'\n"
         "DEVICE_TOKEN = '" + token + "'\n"
         "INTERVAL     = 10\n\n"
@@ -73,7 +73,7 @@ def create_agent(cliente, token, url):
         "        pass\n"
         "    return []\n\n"
         "def run():\n"
-        "    logger.info(f'NexusWatch Agent iniciado — {get_hostname()}')\n"
+        "    logger.info(f'ETI SENTINEL Agent iniciado — {get_hostname()}')\n"
         "    logger.info(f'Servidor: {INGEST_URL}')\n"
         "    while True:\n"
         "        try:\n"
@@ -101,7 +101,7 @@ def create_agent(cliente, token, url):
     return filepath
 
 def create_task(cliente, agent_path):
-    task_name = f"NexusWatch_{cliente.replace(' ','_')}"
+    task_name = f"ETI_SENTINEL_{cliente.replace(' ','_')}"
     python_path = sys.executable.replace("python.exe", "pythonw.exe")
     if not os.path.exists(python_path):
         python_path = sys.executable

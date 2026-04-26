@@ -98,7 +98,7 @@ app.use((req, res, next) => {
 
 app.get("/", (req, res) => {
   if (hasFrontend) return res.sendFile(frontendIndex);
-  return res.json({ status: "online", service: "NexusWatch API", version: "1.0.3" });
+  return res.json({ status: "online", service: "ETI SENTINEL API", version: "1.0.3" });
 });
 app.get("/health", async (req, res) => {
   try {
@@ -454,7 +454,7 @@ async function initDB() {
 }
 initDB();
 
-const JWT_SECRET = process.env.JWT_SECRET || "nexuswatch-secret-key-2024";
+const JWT_SECRET = process.env.JWT_SECRET || "changeme-secret-jwt";
 const sanitize = (v) => v ? v.replace(/["'`\s]/g, "").trim() : "";
 const WEBSOCKET_URL = sanitize(process.env.WEBSOCKET_URL || "");
 const TG_TOKEN_GLOBAL = sanitize(process.env.TELEGRAM_TOKEN || "");
@@ -1645,7 +1645,7 @@ tcpServer.listen(TCP_PORT, "0.0.0.0", () => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`=========================================`);
-  console.log(`🚀 NexusWatch API Online na Porta: ${PORT}`);
+  console.log(`🚀 ETI SENTINEL API Online na Porta: ${PORT}`);
   console.log(`=========================================`);
 });
 

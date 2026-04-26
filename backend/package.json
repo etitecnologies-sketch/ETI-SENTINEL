@@ -1,7 +1,7 @@
 {
-  "name": "backend",
+  "name": "eti-sentinel-backend",
   "version": "1.0.0",
-  "description": "Backend - NexusWatch Pro",
+  "description": "ETI SENTINEL — Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

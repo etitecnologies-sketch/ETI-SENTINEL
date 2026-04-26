@@ -2,7 +2,7 @@ import requests
 import time
 import sys
 
-# URLs do Sistema NexusWatch Pro
+# URLs do Sistema ETI SENTINEL
 API_URL = "https://monitoring-system-production-1e5a.up.railway.app"
 FRONTEND_URL = "https://powerful-unity-production-c566.up.railway.app"
 WS_URL = "https://monitoring-system-production-1e5a.up.railway.app/publish" # Endpoint interno via Ingest
@@ -36,7 +36,7 @@ def check_url(name, url):
 
 def diagnostic():
     print("="*50)
-    print("🚀 NexusWatch Pro - Script de Diagnóstico")
+    print("🚀 ETI SENTINEL - Script de Diagnóstico")
     print("="*50)
     
     # 1. Testar Ingest API

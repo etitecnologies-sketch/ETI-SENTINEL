@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# NexusWatch Universal Agent (Shell Edition)
+# ETI SENTINEL Universal Agent (Shell Edition)
 # Uso: ./nexuswatch_agent.sh <URL_API> <TOKEN_OU_MAC> [INTERVALO_SEGUNDOS]
 
 API_URL=$1
@@ -13,7 +13,7 @@ if [ -z "$API_URL" ] || [ -z "$TOKEN" ]; then
     exit 1
 fi
 
-echo "🚀 NexusWatch Agent Iniciado..."
+echo "🚀 ETI SENTINEL Agent Iniciado..."
 echo "📡 Alvo: $API_URL"
 echo "🔑 ID: $TOKEN"
 echo "⏱️ Intervalo: ${INTERVAL}s"

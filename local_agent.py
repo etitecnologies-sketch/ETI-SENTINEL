@@ -4,8 +4,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("LocalAgent")
 
 # ── CONFIGURAÇÃO ──────────────────────────────────────────────
-INGEST_URL = "https://monitoring-system-production-1e5a.up.railway.app/metrics"
-DEVICE_TOKEN = "5058431f48bb782f72b9cd67b01422f61cdb35549b282f6fbbe3c2b3f447daf1"
+INGEST_URL = os.getenv("INGEST_URL", "https://monitoring-system-production-1e5a.up.railway.app/metrics")
+DEVICE_TOKEN = os.getenv("DEVICE_TOKEN", "")
 INTERVAL     = 10
 
 def get_hostname():
@@ -118,7 +118,10 @@ def fetch_devices():
     return []
 
 def run_agent():
-    logger.info(f"NexusWatch Agent iniciado — {get_hostname()}")
+    if not DEVICE_TOKEN:
+        logger.error("✗ DEVICE_TOKEN não definido. Configure a variável de ambiente DEVICE_TOKEN.")
+        return
+    logger.info(f"ETI SENTINEL Agent iniciado — {get_hostname()}")
     logger.info(f"Enviando para: {INGEST_URL}")
     logger.info(f"Intervalo: {INTERVAL}s")
 

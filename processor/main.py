@@ -15,7 +15,7 @@ TIMEZONE_DISPLAY = datetime.timezone(datetime.timedelta(hours=-3))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-APP_NAME        = "NexusWatch Pro"
+APP_NAME        = "ETI SENTINEL"
 
 def sanitize(val): return re.sub(r'["\'`\s]', '', val) if val else ""
 def escape_html(text):
@@ -449,7 +449,7 @@ def check_offline_devices(cur, conn):
                     f"Host: <b>{escape_html(dev_name)}</b>\n"
                     f"Data do Evento: <b>{now_display()}</b>\n"
                     f"Detalhes do Equipamento: {escape_html(dtype or 'other')} - {escape_html(mac or sn or 'N/A')}\n"
-                    f"Descrição: {escape_html(cl_name or 'NexusWatch')}\n"
+                    f"Descrição: {escape_html(cl_name or 'ETI SENTINEL')}\n"
                     + (f"Empresa: {escape_html(device_description)}\n" if device_description else "")
                     + "Indicação: Verifique a conectividade e energia do dispositivo."
                 )
@@ -484,7 +484,7 @@ def check_offline_devices(cur, conn):
                 f"Host: <b>{escape_html(dev_name)}</b>\n"
                 f"Data da Normalização: <b>{now_display()}</b>\n"
                 f"Detalhes do Equipamento: {escape_html(dtype or 'other')} - {escape_html(mac or sn or 'N/A')}\n"
-                f"Descrição: {escape_html(cl_name or 'NexusWatch')}\n"
+                f"Descrição: {escape_html(cl_name or 'ETI SENTINEL')}\n"
                 + (f"Empresa: {escape_html(device_description)}" if device_description else "")
             )
             send_telegram(msg, tg_tok, tg_cid)
@@ -533,7 +533,7 @@ def fire_alert(cur,conn,trigger_id,name,host,expr,value,threshold,device_id=None
          f"Host: <b>{ehost}</b>\n"
          f"Data do Evento: <b>{now_display()}</b>\n"
          f"Detalhes do Equipamento: {escape_html(dtype or 'other')} - {escape_html(mac or sn or 'N/A')}\n"
-         f"Descrição: {escape_html(cl_name or 'NexusWatch')}\n"
+         f"Descrição: {escape_html(cl_name or 'ETI SENTINEL')}\n"
          f"Indicação: {esev_label} — verifique o dispositivo.")
     send_telegram(msg, tg_tok, tg_cid)
     send_email(f"[{APP_NAME}] {sev_icon} {sev_label}: {name} em {host}",
@@ -646,13 +646,13 @@ def check_new_events(cur, conn):
             f"📝 {edesc}\n"
             + (f"📍 Local: {edloc}\n" if edloc else "")
             + (f"🏢 Empresa: {eddesc}\n" if eddesc else "")
-            + f"👤 Cliente: {escape_html(cl_name or 'NexusWatch')}"
+            + f"👤 Cliente: {escape_html(cl_name or 'ETI SENTINEL')}"
         )
         
         send_telegram(msg, tg_tok, tg_cid)
         if cl_email:
             try:
-                subject = f"[NexusWatch] {etype_display} - {dname}"
+                subject = f"[ETI SENTINEL] {etype_display} - {dname}"
                 body = msg.replace("<b>", "").replace("</b>", "")
                 send_email(cl_email, subject, body)
             except Exception as e:
@@ -711,7 +711,7 @@ def main():
         f"⏱ Checagem: <b>{EVAL_INTERVAL}s</b>\n📡 Ping: <b>{PING_TIMEOUT}s timeout</b>\n"
         f"📴 Offline timeout: <b>{OFFLINE_TIMEOUT}s</b>\n🔕 Cooldown: <b>{ALERT_COOLDOWN}s</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n✅ Multi-tenant ATIVO\n✅ Ping Monitor ATIVO\n✅ SNMP Monitor ATIVO\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n🕐 {now_str()} #nexuswatch"
+        f"━━━━━━━━━━━━━━━━━━━━\n🕐 {now_str()} #etisentinel"
     )
     while True:
         try: evaluate_once()

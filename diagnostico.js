@@ -2,7 +2,7 @@ const https = require('https');
 
 // URLs atualizadas com base na sua imagem do Railway
 const targets = [
-    { name: "API (monitoring-system)", url: "https://monitoring-system-production-1e5a.up.railway.app/auth/status" },
+    { name: "API (ETI SENTINEL)", url: "https://monitoring-system-production-1e5a.up.railway.app/auth/status" },
     { name: "Frontend Correto (powerful-unity)", url: "https://powerful-unity-production.up.railway.app/" }
 ];
 
@@ -27,7 +27,7 @@ function check(target) {
 }
 
 console.log("=".repeat(50));
-console.log("🚀 NexusWatch Pro - Scanner de Serviços Railway");
+console.log("🚀 ETI SENTINEL - Scanner de Serviços Railway");
 console.log("=".repeat(50));
 
 targets.forEach((t, i) => {
