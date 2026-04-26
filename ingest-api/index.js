@@ -522,27 +522,40 @@ function clientFilter(req) {
 
 // ── Auth ─────────────────────────────────────────────────────
 app.get("/auth/status", async (req, res) => {
-  const r = await pool.query("SELECT id FROM users LIMIT 1");
-  res.json({ setupDone: r.rows.length > 0 });
+  try {
+    const r = await pool.query("SELECT id FROM users LIMIT 1");
+    res.json({ setupDone: r.rows.length > 0 });
+  } catch (e) {
+    res.status(503).json({ setupDone: false, error: "Database unavailable" });
+  }
 });
 
 app.post("/auth/setup", async (req, res) => {
-  const { username, password } = req.body;
-  const exists = await pool.query("SELECT id FROM users LIMIT 1");
-  if (exists.rows.length > 0) return res.status(409).json({ error: "Setup already done" });
-  const hash = await bcrypt.hash(password, 10);
-  await pool.query("INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'superadmin')", [username, hash]);
-  res.json({ ok: true });
+  try {
+    const { username, password } = req.body;
+    const exists = await pool.query("SELECT id FROM users LIMIT 1");
+    if (exists.rows.length > 0) return res.status(409).json({ error: "Setup already done" });
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query("INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'superadmin')", [username, hash]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: "Setup failed" });
+  }
 });
 
 app.post("/auth/login", loginLimiter, async (req, res) => {
-  const { username, password } = req.body;
-  const r = await pool.query("SELECT * FROM users WHERE username=$1", [username]);
-  const user = r.rows[0];
-  if (!user || !(await bcrypt.compare(password, user.password_hash)))
-    return res.status(401).json({ error: "Invalid credentials" });
-  const token = jwt.sign({ id: user.id, username, role: user.role, client_id: user.client_id }, JWT_SECRET, { expiresIn: "7d" });
-  res.json({ token, role: user.role, client_id: user.client_id });
+  try {
+    const { username, password } = req.body;
+    const r = await pool.query("SELECT * FROM users WHERE username=$1", [username]);
+    const user = r.rows[0];
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const token = jwt.sign({ id: user.id, username, role: user.role, client_id: user.client_id }, JWT_SECRET, { expiresIn: "7d" });
+    res.json({ token, role: user.role, client_id: user.client_id });
+  } catch (e) {
+    res.status(500).json({ error: "Login failed" });
+  }
 });
 
 app.get("/auth/me", auth, (req, res) => res.json(req.user));

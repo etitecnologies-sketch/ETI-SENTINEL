@@ -473,7 +473,7 @@ function AuthPage({ onLogin }) {
       
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
 
         const res = await fetch(`${finalApi}/auth/status`, { 
           signal: controller.signal,
@@ -488,7 +488,11 @@ function AuthPage({ onLogin }) {
         setErr(""); 
       } catch (e) {
         console.error("[App] API Connection Error:", e);
-        setErr(`❌ Erro de Conexão: ${e.message}. Verifique se o link ${finalApi} está correto.`);
+        const msg =
+          e?.name === "AbortError"
+            ? `❌ Timeout ao conectar na API. No Railway isso pode acontecer no primeiro boot (cold start) ou se a API estiver reiniciando. Teste ${finalApi}/health e verifique se a variável DATABASE_URL está configurada.`
+            : `❌ Erro de Conexão: ${e.message}. Verifique se o link ${finalApi} está correto.`;
+        setErr(msg);
         setStep("login");
       }
     };
