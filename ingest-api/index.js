@@ -15,6 +15,28 @@ const fs = require("fs");
 const app = express();
 app.set("trust proxy", 1);
 
+function sanitizeCorsValue(v) {
+  const s = v ? String(v).trim() : "";
+  return s.replace(/["'`\s]/g, "");
+}
+
+const corsOriginRawEarly = process.env.CORS_ORIGIN || "*";
+const corsOriginEarly = corsOriginRawEarly
+  .split(",")
+  .map((s) => sanitizeCorsValue(s))
+  .filter(Boolean);
+
+const corsOptionsEarly = {
+  origin: corsOriginEarly.length === 0 ? "*" : corsOriginEarly,
+  credentials: corsOriginEarly.length > 0 && !(corsOriginEarly.length === 1 && corsOriginEarly[0] === "*"),
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-device-token", "x-collector-key", "x-event-source"],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptionsEarly));
+app.options("*", cors(corsOptionsEarly));
+
 const frontendDistDir = path.join(__dirname, "..", "frontend", "dist");
 const frontendIndex = path.join(frontendDistDir, "index.html");
 const hasFrontend = fs.existsSync(frontendIndex);
@@ -218,22 +240,6 @@ app.post(
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 app.use(xmlparser({ explicitArray: false, normalize: true })); // Suporte para XML (Intelbras/Hikvision)
-const corsOriginRaw = process.env.CORS_ORIGIN || "*";
-const corsOrigin = corsOriginRaw
-  .split(",")
-  .map((s) => sanitize(s))
-  .filter(Boolean);
-
-const corsOptions = {
-  origin: corsOrigin.length === 0 ? "*" : corsOrigin,
-  credentials: corsOrigin.length > 0 && !(corsOrigin.length === 1 && corsOrigin[0] === "*"),
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-device-token", "x-collector-key", "x-event-source"],
-  optionsSuccessStatus: 204,
-};
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
 
 if (hasFrontend) {
   app.use(express.static(frontendDistDir, { index: false }));
