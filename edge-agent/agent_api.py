@@ -145,11 +145,41 @@ def _push_to_server(ingest_api_url: str, collector_key: str, agent_id: str, clie
 
 def _run_scan(job_id: str, store: JobStore, env: Dict[str, str], user: str, password: str, timeout: float) -> None:
     try:
-        cameras = discover_cameras(timeout=timeout, user=user, password=password, workers=int(env.get("CAMERA_SCAN_WORKERS") or 32))
-        store.set_done(job_id, {"cameras": cameras, "count": len(cameras)})
-
         ingest_api_url = _sanitize_base_url(env.get("INGEST_API_URL") or "")
         collector_key = sanitize(env.get("COLLECTOR_KEY") or "")
+
+        creds_by_ip = None
+        if _bool(env.get("CAMERA_REMOTE_CREDS") or "1") and ingest_api_url and collector_key:
+            try:
+                r = requests.get(
+                    ingest_api_url.rstrip("/") + "/collector/onvif-config",
+                    headers={"x-collector-key": collector_key},
+                    timeout=12,
+                )
+                if r.status_code == 200:
+                    data = r.json() or []
+                    m = {}
+                    for row in data:
+                        ip = sanitize(row.get("host") or "")
+                        u = sanitize(row.get("username") or "")
+                        p = sanitize(row.get("password") or "")
+                        if not ip or not u:
+                            continue
+                        m.setdefault(ip, []).append({"user": u, "password": p})
+                    creds_by_ip = m
+            except Exception:
+                creds_by_ip = None
+
+        cameras = discover_cameras(
+            timeout=timeout,
+            user=user,
+            password=password,
+            workers=int(env.get("CAMERA_SCAN_WORKERS") or 32),
+            creds_by_ip=creds_by_ip,
+            max_cred_tries=int(env.get("CAMERA_MAX_CRED_TRIES") or 2),
+        )
+        store.set_done(job_id, {"cameras": cameras, "count": len(cameras)})
+
         agent_id = sanitize(env.get("AGENT_ID") or os.getenv("COMPUTERNAME") or os.getenv("HOSTNAME") or "edge")
         client_id = sanitize(env.get("CLIENT_ID") or "")
         client_id_int = int(client_id) if client_id.isdigit() else None

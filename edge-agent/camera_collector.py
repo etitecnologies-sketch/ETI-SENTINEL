@@ -185,7 +185,19 @@ def _stream_uri_template(media: Any, profile_token: str) -> str:
 
 def _looks_like_auth_error(msg: str) -> bool:
     m = (msg or "").lower()
-    return ("notauthorized" in m) or ("unauthorized" in m) or ("401" in m) or ("forbidden" in m) or ("403" in m)
+    return (
+        ("notauthorized" in m)
+        or ("not authorized" in m)
+        or ("sender not authorized" in m)
+        or ("unauthorized" in m)
+        or ("invalid username" in m)
+        or ("invalid password" in m)
+        or ("bad username" in m)
+        or ("bad password" in m)
+        or ("401" in m)
+        or ("forbidden" in m)
+        or ("403" in m)
+    )
 
 
 def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: float) -> Dict[str, Any]:
@@ -251,7 +263,7 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
                     rtsp = ""
                 profiles.append(_to_profile(p, rtsp))
             got_any_details = got_any_details or (len(ps) > 0)
-        except Exception:
+        except Exception as e:
             try:
                 if hasattr(cam, "create_media2_service"):
                     media2 = cam.create_media2_service()
@@ -266,6 +278,13 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
                 else:
                     raise RuntimeError("media service unavailable")
             except Exception as e:
+                msg = _sanitize(str(e))
+                out["profiles_error"] = msg
+                if _looks_like_auth_error(msg):
+                    out["status"] = "auth_failed"
+                    out["error"] = msg
+                    return out
+            if not out["profiles_error"]:
                 msg = _sanitize(str(e))
                 out["profiles_error"] = msg
                 if _looks_like_auth_error(msg):
@@ -303,14 +322,59 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
         return out
 
 
-def discover_cameras(timeout: float = 6.0, user: str = "admin", password: str = "", workers: int = 32) -> List[Dict[str, Any]]:
+def discover_cameras(
+    timeout: float = 6.0,
+    user: str = "admin",
+    password: str = "",
+    workers: int = 32,
+    creds_by_ip: Optional[Dict[str, List[Dict[str, str]]]] = None,
+    max_cred_tries: int = 2,
+) -> List[Dict[str, Any]]:
     xaddrs = ws_discover_onvif_xaddrs(timeout)
     if not xaddrs:
         return []
 
+    def pick_creds(ip: str) -> List[tuple[str, str]]:
+        out: List[tuple[str, str]] = []
+        if creds_by_ip and ip in creds_by_ip:
+            for c in creds_by_ip.get(ip) or []:
+                u = _sanitize(c.get("user") or "")
+                p = _sanitize(c.get("password") or "")
+                if not u:
+                    continue
+                out.append((u, p))
+        u0 = _sanitize(user)
+        p0 = _sanitize(password)
+        if u0:
+            out.append((u0, p0))
+        seen = set()
+        dedup: List[tuple[str, str]] = []
+        for u, p in out:
+            k = u + "\n" + p
+            if k in seen:
+                continue
+            seen.add(k)
+            dedup.append((u, p))
+        return dedup[: max(1, int(max_cred_tries))]
+
+    def fetch_for_xaddr(xa: str) -> Dict[str, Any]:
+        x = _extract_http_url(xa)
+        ip = urlparse(x).hostname or ""
+        creds = pick_creds(ip)
+        last: Optional[Dict[str, Any]] = None
+        for u, p in creds:
+            r = fetch_onvif_camera_details(x, u, p, timeout)
+            last = r
+            st = str(r.get("status") or "")
+            if st == "online":
+                return r
+            if st == "reachable" and (r.get("profiles") or r.get("manufacturer") or r.get("model")):
+                return r
+        return last or {"xaddr": x, "ip": ip, "status": "error", "error": "no_result"}
+
     results: List[Dict[str, Any]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(workers))) as ex:
-        futs = [ex.submit(fetch_onvif_camera_details, xa, user, password, timeout) for xa in xaddrs]
+        futs = [ex.submit(fetch_for_xaddr, xa) for xa in xaddrs]
         for f in concurrent.futures.as_completed(futs):
             try:
                 r = f.result()
