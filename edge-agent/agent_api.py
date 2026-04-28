@@ -149,32 +149,57 @@ def _run_scan(job_id: str, store: JobStore, env: Dict[str, str], user: str, pass
         collector_key = sanitize(env.get("COLLECTOR_KEY") or "")
 
         creds_by_ip = None
-        remote_creds = {"enabled": False, "fetched": False, "http_status": None, "ip_count": 0, "error": ""}
+        remote_creds = {
+            "enabled": False,
+            "fetched": False,
+            "http_status": None,
+            "ip_count": 0,
+            "error": "",
+            "error_detail": "",
+            "url": "",
+        }
         if _bool(env.get("CAMERA_REMOTE_CREDS") or "1") and ingest_api_url and collector_key:
             remote_creds["enabled"] = True
+            remote_creds["url"] = ingest_api_url.rstrip("/") + "/collector/onvif-config"
             try:
-                r = requests.get(
-                    ingest_api_url.rstrip("/") + "/collector/onvif-config",
-                    headers={"x-collector-key": collector_key},
-                    timeout=12,
-                )
-                remote_creds["http_status"] = int(r.status_code)
-                if r.status_code == 200:
-                    data = r.json() or []
-                    m = {}
-                    for row in data:
-                        ip = sanitize(row.get("host") or "")
-                        u = sanitize(row.get("username") or "")
-                        p = sanitize(row.get("password") or "")
-                        if not ip or not u:
-                            continue
-                        m.setdefault(ip, []).append({"user": u, "password": p})
-                    creds_by_ip = m
-                    remote_creds["fetched"] = True
-                    remote_creds["ip_count"] = len(m.keys())
-            except Exception:
+                last_exc = None
+                for _ in range(2):
+                    try:
+                        r = requests.get(
+                            remote_creds["url"],
+                            headers={"x-collector-key": collector_key},
+                            timeout=(5, 18),
+                        )
+                        remote_creds["http_status"] = int(r.status_code)
+                        if r.status_code != 200:
+                            remote_creds["error"] = "http_error"
+                            remote_creds["error_detail"] = sanitize(r.text)[:240]
+                            break
+                        data = r.json() or []
+                        m = {}
+                        for row in data:
+                            ip = sanitize(row.get("host") or "")
+                            u = sanitize(row.get("username") or "")
+                            p = sanitize(row.get("password") or "")
+                            if not ip or not u:
+                                continue
+                            m.setdefault(ip, []).append({"user": u, "password": p})
+                        creds_by_ip = m
+                        remote_creds["fetched"] = True
+                        remote_creds["ip_count"] = len(m.keys())
+                        remote_creds["error"] = ""
+                        remote_creds["error_detail"] = ""
+                        break
+                    except Exception as e:
+                        last_exc = e
+                        time.sleep(0.5)
+                if (not remote_creds["fetched"]) and last_exc is not None:
+                    remote_creds["error"] = "failed_to_fetch"
+                    remote_creds["error_detail"] = sanitize(str(last_exc))[:240]
+            except Exception as e:
                 creds_by_ip = None
                 remote_creds["error"] = "failed_to_fetch"
+                remote_creds["error_detail"] = sanitize(str(e))[:240]
 
         cameras = discover_cameras(
             timeout=timeout,
