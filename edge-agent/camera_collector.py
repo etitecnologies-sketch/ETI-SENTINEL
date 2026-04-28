@@ -3,7 +3,7 @@ import re
 import socket
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 
@@ -23,8 +23,16 @@ except Exception:
 
 def _sanitize(s: Any) -> str:
     v = str(s or "").strip()
-    v = v.replace("`", "").replace("´", "").replace('"', "").replace("'", "").strip()
+    v = v.replace("`", "").replace("´", "").replace("“", "").replace("”", "").replace("‘", "").replace("’", "").replace('"', "").replace("'", "").strip()
     return v
+
+
+def _extract_http_url(s: Any) -> str:
+    t = str(s or "")
+    m = re.search(r"(https?://[^\s\"'`<>]+)", t, flags=re.IGNORECASE)
+    if not m:
+        return _sanitize(s)
+    return _sanitize(m.group(1))
 
 
 def _wsd_manual(timeout: float) -> List[str]:
@@ -69,8 +77,9 @@ def _wsd_manual(timeout: float) -> List[str]:
             matches = re.findall(r"<[^>]*XAddrs[^>]*>(.*?)</[^>]*XAddrs[^>]*>", text, flags=re.IGNORECASE)
             for m in matches:
                 for url in _sanitize(m).split():
-                    if url.startswith("http") and url not in xaddrs:
-                        xaddrs.append(url)
+                    u = _extract_http_url(url)
+                    if u.startswith("http") and u not in xaddrs:
+                        xaddrs.append(u)
     finally:
         try:
             if sock:
@@ -95,7 +104,7 @@ def _wsd_lib(timeout: float) -> List[str]:
         )
         for svc in services:
             for addr in svc.getXAddrs():
-                a = _sanitize(addr)
+                a = _extract_http_url(addr)
                 if a and a not in xaddrs:
                     xaddrs.append(a)
     except Exception:
@@ -174,8 +183,13 @@ def _stream_uri_template(media: Any, profile_token: str) -> str:
     return uri.replace("rtsp://", "rtsp://{username}:{password}@", 1)
 
 
+def _looks_like_auth_error(msg: str) -> bool:
+    m = (msg or "").lower()
+    return ("notauthorized" in m) or ("unauthorized" in m) or ("401" in m) or ("forbidden" in m) or ("403" in m)
+
+
 def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: float) -> Dict[str, Any]:
-    xaddr_s = _sanitize(xaddr)
+    xaddr_s = _extract_http_url(xaddr)
     parsed = urlparse(xaddr_s)
     host = parsed.hostname or ""
     port = parsed.port or 80
@@ -191,7 +205,13 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
         "serial": "",
         "profiles": [],
         "ptz": False,
+        "device_info_error": "",
+        "profiles_error": "",
     }
+
+    if not host:
+        out["error"] = "invalid_xaddr"
+        return out
 
     if not _HAS_ONVIF:
         out["error"] = "onvif-zeep not installed"
@@ -204,14 +224,21 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
         except Exception:
             pass
 
+        got_any_details = False
         try:
             dev = cam.devicemgmt.GetDeviceInformation()
             out["manufacturer"] = _sanitize(getattr(dev, "Manufacturer", "") or "")
             out["model"] = _sanitize(getattr(dev, "Model", "") or "")
             out["firmware"] = _sanitize(getattr(dev, "FirmwareVersion", "") or "")
             out["serial"] = _sanitize(getattr(dev, "SerialNumber", "") or "")
-        except Exception:
-            pass
+            got_any_details = True
+        except Exception as e:
+            msg = _sanitize(str(e))
+            out["device_info_error"] = msg
+            if _looks_like_auth_error(msg):
+                out["status"] = "auth_failed"
+                out["error"] = msg
+                return out
 
         profiles: List[CameraProfile] = []
         try:
@@ -223,8 +250,28 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
                 except Exception:
                     rtsp = ""
                 profiles.append(_to_profile(p, rtsp))
+            got_any_details = got_any_details or (len(ps) > 0)
         except Exception:
-            pass
+            try:
+                if hasattr(cam, "create_media2_service"):
+                    media2 = cam.create_media2_service()
+                    ps2 = media2.GetProfiles() or []
+                    for p in ps2:
+                        try:
+                            rtsp = _stream_uri_template(media2, str(getattr(p, "token", "") or ""))
+                        except Exception:
+                            rtsp = ""
+                        profiles.append(_to_profile(p, rtsp))
+                    got_any_details = got_any_details or (len(ps2) > 0)
+                else:
+                    raise RuntimeError("media service unavailable")
+            except Exception as e:
+                msg = _sanitize(str(e))
+                out["profiles_error"] = msg
+                if _looks_like_auth_error(msg):
+                    out["status"] = "auth_failed"
+                    out["error"] = msg
+                    return out
 
         out["profiles"] = [
             {
@@ -247,10 +294,12 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
         except Exception:
             out["ptz"] = False
 
-        out["status"] = "online"
+        out["status"] = "online" if got_any_details else "reachable"
         return out
     except Exception as e:
-        out["error"] = _sanitize(str(e))
+        msg = _sanitize(str(e))
+        out["error"] = msg
+        out["status"] = "auth_failed" if _looks_like_auth_error(msg) else "error"
         return out
 
 
