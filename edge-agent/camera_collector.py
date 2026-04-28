@@ -334,27 +334,27 @@ def discover_cameras(
     if not xaddrs:
         return []
 
-    def pick_creds(ip: str) -> List[tuple[str, str]]:
-        out: List[tuple[str, str]] = []
+    def pick_creds(ip: str) -> List[tuple[str, str, str]]:
+        out: List[tuple[str, str, str]] = []
         if creds_by_ip and ip in creds_by_ip:
             for c in creds_by_ip.get(ip) or []:
                 u = _sanitize(c.get("user") or "")
                 p = _sanitize(c.get("password") or "")
                 if not u:
                     continue
-                out.append((u, p))
+                out.append((u, p, "remote"))
         u0 = _sanitize(user)
         p0 = _sanitize(password)
         if u0:
-            out.append((u0, p0))
+            out.append((u0, p0, "request"))
         seen = set()
-        dedup: List[tuple[str, str]] = []
-        for u, p in out:
-            k = u + "\n" + p
+        dedup: List[tuple[str, str, str]] = []
+        for u, p, src in out:
+            k = u + "\n" + p + "\n" + src
             if k in seen:
                 continue
             seen.add(k)
-            dedup.append((u, p))
+            dedup.append((u, p, src))
         return dedup[: max(1, int(max_cred_tries))]
 
     def fetch_for_xaddr(xa: str) -> Dict[str, Any]:
@@ -362,8 +362,10 @@ def discover_cameras(
         ip = urlparse(x).hostname or ""
         creds = pick_creds(ip)
         last: Optional[Dict[str, Any]] = None
-        for u, p in creds:
+        for u, p, src in creds:
             r = fetch_onvif_camera_details(x, u, p, timeout)
+            r["used_username"] = u
+            r["creds_source"] = src
             last = r
             st = str(r.get("status") or "")
             if st == "online":

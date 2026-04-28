@@ -149,13 +149,16 @@ def _run_scan(job_id: str, store: JobStore, env: Dict[str, str], user: str, pass
         collector_key = sanitize(env.get("COLLECTOR_KEY") or "")
 
         creds_by_ip = None
+        remote_creds = {"enabled": False, "fetched": False, "http_status": None, "ip_count": 0, "error": ""}
         if _bool(env.get("CAMERA_REMOTE_CREDS") or "1") and ingest_api_url and collector_key:
+            remote_creds["enabled"] = True
             try:
                 r = requests.get(
                     ingest_api_url.rstrip("/") + "/collector/onvif-config",
                     headers={"x-collector-key": collector_key},
                     timeout=12,
                 )
+                remote_creds["http_status"] = int(r.status_code)
                 if r.status_code == 200:
                     data = r.json() or []
                     m = {}
@@ -167,8 +170,11 @@ def _run_scan(job_id: str, store: JobStore, env: Dict[str, str], user: str, pass
                             continue
                         m.setdefault(ip, []).append({"user": u, "password": p})
                     creds_by_ip = m
+                    remote_creds["fetched"] = True
+                    remote_creds["ip_count"] = len(m.keys())
             except Exception:
                 creds_by_ip = None
+                remote_creds["error"] = "failed_to_fetch"
 
         cameras = discover_cameras(
             timeout=timeout,
@@ -178,7 +184,7 @@ def _run_scan(job_id: str, store: JobStore, env: Dict[str, str], user: str, pass
             creds_by_ip=creds_by_ip,
             max_cred_tries=int(env.get("CAMERA_MAX_CRED_TRIES") or 2),
         )
-        store.set_done(job_id, {"cameras": cameras, "count": len(cameras)})
+        store.set_done(job_id, {"cameras": cameras, "count": len(cameras), "remote_creds": remote_creds})
 
         agent_id = sanitize(env.get("AGENT_ID") or os.getenv("COMPUTERNAME") or os.getenv("HOSTNAME") or "edge")
         client_id = sanitize(env.get("CLIENT_ID") or "")
