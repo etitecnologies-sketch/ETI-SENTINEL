@@ -24,12 +24,15 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _sanitize(s: Any) -> str:
-    return str(s or "").strip()
+    v = str(s or "").strip()
+    v = v.replace("`", "")
+    if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+        v = v[1:-1].strip()
+    return v
 
 
 def _normalize_base_url(raw: str, default: str) -> str:
-    s = (raw or "").strip()
-    s = s.replace("`", "").strip()
+    s = _sanitize(raw)
     if not s:
         return default
     if s.startswith("http://") or s.startswith("https://"):
@@ -38,8 +41,8 @@ def _normalize_base_url(raw: str, default: str) -> str:
 
 
 INGEST_API_URL = _normalize_base_url(os.getenv("INGEST_API_URL") or "", "http://localhost:3000")
-COLLECTOR_KEY = os.getenv("COLLECTOR_KEY") or ""
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or ""
+COLLECTOR_KEY = _sanitize(os.getenv("COLLECTOR_KEY") or "")
+ADMIN_TOKEN = _sanitize(os.getenv("ADMIN_TOKEN") or "")
 CLIENT_ID = os.getenv("CLIENT_ID")
 
 DISCOVERY_INTERVAL_SECONDS = _env_int("DISCOVERY_INTERVAL_SECONDS", 0)
