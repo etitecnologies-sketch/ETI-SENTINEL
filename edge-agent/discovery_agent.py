@@ -13,7 +13,9 @@ from dotenv import load_dotenv
 
 
 def _sanitize(s: Any) -> str:
-    return str(s or "").strip().strip("`").strip('"').strip("'").strip()
+    v = str(s or "").strip()
+    v = v.replace("`", "").replace('"', "").replace("'", "").strip()
+    return v
 
 
 def _sanitize_base_url(url: str) -> str:
@@ -96,6 +98,19 @@ def _guess_type(open_ports: Set[int]) -> str:
 
 
 def _networks_to_scan() -> List[ipaddress.IPv4Network]:
+    env = _sanitize(os.getenv("DISCOVERY_SUBNETS") or "")
+    if env:
+        out = []
+        for part in env.split(","):
+            p = part.strip()
+            if not p:
+                continue
+            try:
+                out.append(ipaddress.IPv4Network(p, strict=False))
+            except Exception:
+                continue
+        return out
+
     nets: List[ipaddress.IPv4Network] = []
     for ifname, addrs in psutil.net_if_addrs().items():
         stats = psutil.net_if_stats().get(ifname)
@@ -129,6 +144,16 @@ def _networks_to_scan() -> List[ipaddress.IPv4Network]:
         seen.add(k)
         out.append(n)
     return out
+
+
+def _resolve_hostname(ip: str) -> str:
+    if not ip:
+        return ""
+    try:
+        host, _, _ = socket.gethostbyaddr(ip)
+        return _sanitize(host)
+    except Exception:
+        return ""
 
 
 def _probe_ws_discovery(timeout_seconds: int) -> Dict[str, str]:
@@ -186,8 +211,16 @@ def _probe_ws_discovery(timeout_seconds: int) -> Dict[str, str]:
         return {}
 
 
-def _scan_host(ip: str, ports: List[int], ping_timeout_ms: int, port_timeout_s: float) -> Optional[Dict[str, Any]]:
-    if not _ping(ip, ping_timeout_ms):
+def _scan_host(
+    ip: str,
+    ports: List[int],
+    ping_timeout_ms: int,
+    port_timeout_s: float,
+    require_ping: bool,
+    resolve_dns: bool,
+) -> Optional[Dict[str, Any]]:
+    ping_ok = _ping(ip, ping_timeout_ms)
+    if require_ping and not ping_ok:
         return None
 
     open_ports: Set[int] = set()
@@ -195,17 +228,21 @@ def _scan_host(ip: str, ports: List[int], ping_timeout_ms: int, port_timeout_s: 
         if _tcp_open(ip, p, port_timeout_s):
             open_ports.add(int(p))
 
+    if (not ping_ok) and (len(open_ports) == 0):
+        return None
+
     mac = _arp_mac(ip)
     guess = _guess_type(open_ports)
+    hostname = _resolve_hostname(ip) if resolve_dns else ""
     return {
         "ip_address": ip,
         "mac_address": mac,
-        "hostname": "",
+        "hostname": hostname,
         "vendor": "",
         "guess_type": guess,
         "open_ports": sorted(open_ports),
         "onvif_xaddrs": "",
-        "raw": {"source": "ping+ports"},
+        "raw": {"source": "ping+ports", "ping": ping_ok},
     }
 
 
@@ -236,6 +273,10 @@ def main() -> None:
     ports = [int(x) for x in ports_csv.split(",") if x.strip().isdigit()]
     enable_ws_discovery = _bool(os.getenv("DISCOVERY_ONVIF_WS") or "1")
     ws_timeout = int(os.getenv("DISCOVERY_WS_TIMEOUT_SECONDS") or 2)
+    require_ping = _bool(os.getenv("DISCOVERY_REQUIRE_PING") or "1")
+    resolve_dns = _bool(os.getenv("DISCOVERY_RESOLVE_DNS") or "1")
+    include_self = _bool(os.getenv("DISCOVERY_INCLUDE_SELF") or "0")
+    my_ips = {a.address for addrs in psutil.net_if_addrs().values() for a in addrs if getattr(a, "family", None) == socket.AF_INET}
 
     if not collector_key:
         raise SystemExit("COLLECTOR_KEY obrigatório")
@@ -248,14 +289,17 @@ def main() -> None:
         hosts: List[str] = []
         for n in nets:
             for ip in n.hosts():
-                hosts.append(str(ip))
+                s = str(ip)
+                if (not include_self) and (s in my_ips):
+                    continue
+                hosts.append(s)
                 if len(hosts) >= max_hosts:
                     break
             if len(hosts) >= max_hosts:
                 break
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-            futs = [ex.submit(_scan_host, ip, ports, ping_timeout_ms, port_timeout_s) for ip in hosts]
+            futs = [ex.submit(_scan_host, ip, ports, ping_timeout_ms, port_timeout_s, require_ping, resolve_dns) for ip in hosts]
             for f in concurrent.futures.as_completed(futs):
                 try:
                     r = f.result()
@@ -298,4 +342,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

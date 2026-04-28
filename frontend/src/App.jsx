@@ -1320,6 +1320,7 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
   const [discovered, setDiscovered] = useState([]);
   const [discErr, setDiscErr] = useState("");
   const [discLoading, setDiscLoading] = useState(false);
+  const [discNames, setDiscNames] = useState({});
 
   const load = useCallback(() => {
     api("/devices").then((data) => {
@@ -1348,6 +1349,19 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
     const t = setInterval(loadDiscovered, 15000);
     return () => clearInterval(t);
   }, [loadDiscovered]);
+
+  useEffect(() => {
+    setDiscNames((prev) => {
+      const next = { ...prev };
+      for (const d of discovered) {
+        if (next[d.id] != null) continue;
+        const ip = String(d.ip_address || "");
+        const defName = d.hostname || `${(d.guess_type || "device")}-${ip.replace(/\./g, "-")}`;
+        next[d.id] = defName;
+      }
+      return next;
+    });
+  }, [discovered]);
 
   const del = async (id) => { if (!confirm("Remover este dispositivo?")) return; await api(`/devices/${id}`, { method: "DELETE" }); load(); };
   const regenToken = async (id) => { const d = await api(`/devices/${id}/regenerate-token`, { method: "POST" }); setTokenModal(d.token); load(); };
@@ -1421,9 +1435,11 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ color: "#64748b", textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 9 }}>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Nome</th>
                   <th style={{ textAlign: "left", padding: "10px 8px" }}>IP</th>
                   <th style={{ textAlign: "left", padding: "10px 8px" }}>Tipo</th>
                   <th style={{ textAlign: "left", padding: "10px 8px" }}>Portas</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>MAC</th>
                   <th style={{ textAlign: "left", padding: "10px 8px" }}>Último</th>
                   <th style={{ textAlign: "right", padding: "10px 8px" }}>Ação</th>
                 </tr>
@@ -1432,11 +1448,25 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
                 {discovered.map((d) => {
                   const ports = Array.isArray(d.open_ports) ? d.open_ports.join(", ") : "";
                   const adopted = !!d.device_id;
+                  const hasOnvif = !!(d.onvif_xaddrs && String(d.onvif_xaddrs).trim());
+                  const nameVal = discNames[d.id] ?? "";
                   return (
                     <tr key={d.id} style={{ borderTop: "1px solid rgba(59,158,255,0.08)" }}>
+                      <td style={{ padding: "10px 8px", minWidth: 220 }}>
+                        <input
+                          style={{ ...S.input, height: 34, fontSize: 12 }}
+                          value={nameVal}
+                          onChange={(e) => setDiscNames((p) => ({ ...p, [d.id]: e.target.value }))}
+                          placeholder="Nome do dispositivo"
+                          disabled={adopted}
+                        />
+                      </td>
                       <td style={{ padding: "10px 8px", color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>{d.ip_address || "—"}</td>
-                      <td style={{ padding: "10px 8px", color: "#cbd5e1", fontWeight: 700 }}>{d.guess_type || "other"}</td>
+                      <td style={{ padding: "10px 8px", color: "#cbd5e1", fontWeight: 700 }}>
+                        {d.guess_type || "other"} {hasOnvif ? <span style={{ ...S.badge("#3b9eff"), marginLeft: 8 }}>ONVIF</span> : null}
+                      </td>
                       <td style={{ padding: "10px 8px", color: "#94a3b8", fontFamily: "monospace" }}>{ports || "—"}</td>
+                      <td style={{ padding: "10px 8px", color: "#94a3b8", fontFamily: "monospace" }}>{d.mac_address || "—"}</td>
                       <td style={{ padding: "10px 8px", color: "#94a3b8" }}>{d.last_seen ? timeAgoPtBR(d.last_seen) : "—"}</td>
                       <td style={{ padding: "10px 8px", textAlign: "right" }}>
                         {adopted ? (
@@ -1445,8 +1475,7 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
                           <button
                             style={S.btnSm("primary")}
                             onClick={async () => {
-                              const defName = d.hostname || `${(d.guess_type || "device")}-${(d.ip_address || "").replace(/\./g, "-")}`;
-                              const name = prompt("Nome do dispositivo:", defName);
+                              const name = String((discNames[d.id] ?? "")).trim();
                               if (!name) return;
                               try {
                                 await api(`/discovered-devices/${d.id}/adopt`, { method: "POST", body: JSON.stringify({ name }) });
