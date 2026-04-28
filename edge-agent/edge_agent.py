@@ -105,14 +105,15 @@ def run_check(here: Path, env: dict) -> int:
 def main() -> None:
     here = Path(__file__).resolve().parent
     load_dotenv(here / ".env")
+    env = os.environ.copy()
 
     if "--check" in sys.argv or "check" in sys.argv:
         raise SystemExit(run_check(here, env))
-    env = os.environ.copy()
 
     repo_root = here.parent
     python = sys.executable
 
+    enable_device = _bool(env.get("ENABLE_DEVICE_MONITOR", "1"))
     enable_rtsp = _bool(env.get("ENABLE_RTSP_MONITOR", "1"))
     enable_onvif = _bool(env.get("ENABLE_ONVIF_COLLECTOR", "1"))
 
