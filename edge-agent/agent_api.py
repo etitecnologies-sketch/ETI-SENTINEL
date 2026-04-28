@@ -163,6 +163,18 @@ def _run_scan(job_id: str, store: JobStore, env: Dict[str, str], user: str, pass
 class Handler(BaseHTTPRequestHandler):
     server_version = "eti-sentinel-edge"
 
+    def log_message(self, fmt: str, *args) -> None:
+        try:
+            msg = fmt % args if args else str(fmt)
+            ip = ""
+            try:
+                ip = str(self.client_address[0])
+            except Exception:
+                ip = ""
+            _append_log(self.server.log_path, f"http {ip} {msg}")
+        except Exception:
+            return
+
     def handle(self) -> None:
         try:
             return super().handle()
