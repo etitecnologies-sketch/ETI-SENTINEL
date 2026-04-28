@@ -285,6 +285,27 @@ CREATE TABLE IF NOT EXISTS rtsp_configs (
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS discovered_devices (
+  id          BIGSERIAL PRIMARY KEY,
+  agent_id    TEXT NOT NULL DEFAULT '',
+  client_id   INT REFERENCES clients(id) ON DELETE SET NULL,
+  ip_address  TEXT NOT NULL DEFAULT '',
+  mac_address TEXT DEFAULT '',
+  hostname    TEXT DEFAULT '',
+  vendor      TEXT DEFAULT '',
+  guess_type  TEXT DEFAULT '',
+  open_ports  INT[] DEFAULT '{}',
+  onvif_xaddrs TEXT DEFAULT '',
+  device_id   INT REFERENCES devices(id) ON DELETE SET NULL,
+  raw         JSONB DEFAULT '{}'::jsonb,
+  first_seen  TIMESTAMPTZ DEFAULT NOW(),
+  last_seen   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_discovered_devices_agent_ip ON discovered_devices (agent_id, ip_address);
+CREATE INDEX IF NOT EXISTS idx_discovered_devices_client ON discovered_devices (client_id);
+CREATE INDEX IF NOT EXISTS idx_discovered_devices_last_seen ON discovered_devices (last_seen DESC);
+
 CREATE TABLE IF NOT EXISTS solar_inverters (
   id                SERIAL PRIMARY KEY,
   client_id         INT REFERENCES clients(id) ON DELETE CASCADE,

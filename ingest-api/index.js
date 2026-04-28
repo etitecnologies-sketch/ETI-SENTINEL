@@ -354,6 +354,28 @@ async function initDB() {
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS discovered_devices (
+          id BIGSERIAL PRIMARY KEY,
+          agent_id TEXT NOT NULL DEFAULT '',
+          client_id INT REFERENCES clients(id) ON DELETE SET NULL,
+          ip_address TEXT NOT NULL DEFAULT '',
+          mac_address TEXT DEFAULT '',
+          hostname TEXT DEFAULT '',
+          vendor TEXT DEFAULT '',
+          guess_type TEXT DEFAULT '',
+          open_ports INT[] DEFAULT '{}',
+          onvif_xaddrs TEXT DEFAULT '',
+          device_id INT REFERENCES devices(id) ON DELETE SET NULL,
+          raw JSONB DEFAULT '{}'::jsonb,
+          first_seen TIMESTAMPTZ DEFAULT NOW(),
+          last_seen TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_discovered_devices_agent_ip ON discovered_devices (agent_id, ip_address);
+      CREATE INDEX IF NOT EXISTS idx_discovered_devices_client ON discovered_devices (client_id);
+      CREATE INDEX IF NOT EXISTS idx_discovered_devices_last_seen ON discovered_devices (last_seen DESC);
     `);
     
     // Default triggers if none exist
@@ -977,6 +999,157 @@ app.get("/collector/devices", async (req, res) => {
   } catch (e) {
     console.error("/collector/devices error:", e.message);
     res.status(500).json({ error: "Failed to fetch devices", detail: e.message });
+  }
+});
+
+app.post("/collector/discovery", async (req, res) => {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
+  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const agent_id = sanitize(req.body?.agent_id || "");
+    const client_id = req.body?.client_id ? parseInt(req.body.client_id) : null;
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    if (!agent_id) return res.status(400).json({ error: "agent_id required" });
+    if (items.length === 0) return res.json({ ok: true, upserted: 0 });
+
+    let upserted = 0;
+    for (const it of items) {
+      const ip_address = sanitize(it?.ip_address || "");
+      if (!ip_address) continue;
+      const mac_address = sanitize(it?.mac_address || "");
+      const hostname = sanitize(it?.hostname || "");
+      const vendor = sanitize(it?.vendor || "");
+      const guess_type = sanitize(it?.guess_type || "");
+      const onvif_xaddrs = sanitize(it?.onvif_xaddrs || "");
+      const open_ports_raw = Array.isArray(it?.open_ports) ? it.open_ports : [];
+      const open_ports = open_ports_raw
+        .map((p) => parseInt(p))
+        .filter((p) => Number.isFinite(p) && p > 0 && p <= 65535);
+      const raw = it?.raw && typeof it.raw === "object" ? it.raw : {};
+
+      await pool.query(
+        `
+        INSERT INTO discovered_devices (
+          agent_id, client_id, ip_address, mac_address, hostname, vendor, guess_type,
+          open_ports, onvif_xaddrs, raw, first_seen, last_seen
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,NOW(),NOW())
+        ON CONFLICT (agent_id, ip_address) DO UPDATE SET
+          client_id=COALESCE(EXCLUDED.client_id, discovered_devices.client_id),
+          mac_address=CASE WHEN EXCLUDED.mac_address <> '' THEN EXCLUDED.mac_address ELSE discovered_devices.mac_address END,
+          hostname=CASE WHEN EXCLUDED.hostname <> '' THEN EXCLUDED.hostname ELSE discovered_devices.hostname END,
+          vendor=CASE WHEN EXCLUDED.vendor <> '' THEN EXCLUDED.vendor ELSE discovered_devices.vendor END,
+          guess_type=CASE WHEN EXCLUDED.guess_type <> '' THEN EXCLUDED.guess_type ELSE discovered_devices.guess_type END,
+          open_ports=EXCLUDED.open_ports,
+          onvif_xaddrs=CASE WHEN EXCLUDED.onvif_xaddrs <> '' THEN EXCLUDED.onvif_xaddrs ELSE discovered_devices.onvif_xaddrs END,
+          raw=EXCLUDED.raw,
+          last_seen=NOW()
+        `,
+        [agent_id, client_id, ip_address, mac_address, hostname, vendor, guess_type, open_ports, onvif_xaddrs, JSON.stringify(raw)]
+      );
+      upserted += 1;
+    }
+
+    res.json({ ok: true, upserted });
+  } catch (e) {
+    console.error("/collector/discovery error:", e.message);
+    res.status(500).json({ error: "Failed to save discovery", detail: e.message });
+  }
+});
+
+app.get("/discovered-devices", auth, async (req, res) => {
+  try {
+    const cid = clientFilter(req);
+    const params = [];
+    let where = "dd.last_seen > NOW() - interval '24 hours'";
+    if (String(req.query.all || "") === "1") where = "1=1";
+    if (cid) {
+      params.push(cid);
+      where += ` AND dd.client_id=$${params.length}`;
+    }
+
+    const r = await pool.query(
+      `
+      SELECT dd.*, d.name as adopted_device_name
+      FROM discovered_devices dd
+      LEFT JOIN devices d ON d.id = dd.device_id
+      WHERE ${where}
+      ORDER BY dd.last_seen DESC
+      LIMIT 200
+      `,
+      params
+    );
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/discovered-devices/:id/adopt", auth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const dr = await pool.query("SELECT * FROM discovered_devices WHERE id=$1", [id]);
+    if (dr.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    const dd = dr.rows[0];
+
+    const requestedClientId = req.user.role === "superadmin" ? (req.body?.client_id ? parseInt(req.body.client_id) : null) : req.user.client_id;
+    const targetClientId = requestedClientId || dd.client_id || null;
+
+    if (req.user.role !== "superadmin") {
+      if (dd.client_id && dd.client_id !== req.user.client_id) return res.status(403).json({ error: "Forbidden" });
+      if (!targetClientId) return res.status(400).json({ error: "client_id required" });
+    }
+
+    const name = sanitize(req.body?.name || dd.hostname || `${dd.guess_type || "device"}-${dd.ip_address}`);
+    if (!name) return res.status(400).json({ error: "Name required" });
+
+    const open_ports = Array.isArray(dd.open_ports) ? dd.open_ports : [];
+    const guess = sanitize(dd.guess_type || "");
+    const device_type = guess || (open_ports.includes(554) ? "camera" : "other");
+    const monitor_port = open_ports.includes(80) ? 80 : open_ports.includes(443) ? 443 : 0;
+    const token = crypto.randomBytes(32).toString("hex");
+
+    const ins = await pool.query(
+      `
+      INSERT INTO devices (
+        name, description, location, token, device_type, ip_address, tags,
+        ddns_address, monitor_port, monitor_ping, monitor_agent, notes, client_id,
+        snmp_community, snmp_version, ssh_user, ssh_port,
+        mac_address, serial_number
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+      RETURNING *
+      `,
+      [
+        name,
+        "Descoberto pelo agente local",
+        "",
+        token,
+        device_type || "other",
+        dd.ip_address || "",
+        [device_type || "device", "discovered"],
+        "",
+        monitor_port,
+        true,
+        true,
+        dd.onvif_xaddrs || "",
+        targetClientId,
+        "public",
+        "2c",
+        "",
+        22,
+        dd.mac_address || "",
+        "",
+      ]
+    );
+
+    await pool.query("UPDATE discovered_devices SET device_id=$1 WHERE id=$2", [ins.rows[0].id, id]);
+    res.status(201).json(ins.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to adopt device", detail: e.message });
   }
 });
 

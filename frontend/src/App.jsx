@@ -1317,6 +1317,9 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
   const [tokenModal, setTokenModal] = useState(null);
   const [filter, setFilter] = useState({ type: "", status: "", client: "", search: "" });
   const [testing, setTesting] = useState(null);
+  const [discovered, setDiscovered] = useState([]);
+  const [discErr, setDiscErr] = useState("");
+  const [discLoading, setDiscLoading] = useState(false);
 
   const load = useCallback(() => {
     api("/devices").then((data) => {
@@ -1330,6 +1333,21 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
     const t = setInterval(load, 2000); // REFRESH CADA 2 SEGUNDOS (MODO REAL-TIME)
     return () => clearInterval(t); 
   }, [load]);
+
+  const loadDiscovered = useCallback(() => {
+    setDiscLoading(true);
+    setDiscErr("");
+    api("/discovered-devices")
+      .then((data) => setDiscovered(Array.isArray(data) ? data : []))
+      .catch((e) => setDiscErr(e?.error || e?.message || "Falha ao carregar descobertos"))
+      .finally(() => setDiscLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadDiscovered();
+    const t = setInterval(loadDiscovered, 15000);
+    return () => clearInterval(t);
+  }, [loadDiscovered]);
 
   const del = async (id) => { if (!confirm("Remover este dispositivo?")) return; await api(`/devices/${id}`, { method: "DELETE" }); load(); };
   const regenToken = async (id) => { const d = await api(`/devices/${id}/regenerate-token`, { method: "POST" }); setTokenModal(d.token); load(); };
@@ -1382,6 +1400,73 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
             <option value="">Todos clientes</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+        )}
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 24, padding: 18, background: "#0d1929", border: "1px solid rgba(59,158,255,0.08)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontWeight: 800, color: "#fff", letterSpacing: 0.5 }}>🔎 Descobertos na rede local</div>
+            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Encontrados pelo agente (varredura + ONVIF WS-Discovery). Um clique para adicionar.</div>
+          </div>
+          <button style={S.btnSm()} onClick={loadDiscovered} disabled={discLoading}>{discLoading ? "..." : "Atualizar"}</button>
+        </div>
+        {discErr && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 10 }}>⚠️ {discErr}</div>}
+        {discovered.length === 0 ? (
+          <div style={{ color: "#4a6080", fontSize: 12, padding: "10px 0" }}>
+            {discLoading ? "Carregando..." : "Nenhum equipamento descoberto nas últimas 24h."}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ color: "#64748b", textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 9 }}>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>IP</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Tipo</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Portas</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Último</th>
+                  <th style={{ textAlign: "right", padding: "10px 8px" }}>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {discovered.map((d) => {
+                  const ports = Array.isArray(d.open_ports) ? d.open_ports.join(", ") : "";
+                  const adopted = !!d.device_id;
+                  return (
+                    <tr key={d.id} style={{ borderTop: "1px solid rgba(59,158,255,0.08)" }}>
+                      <td style={{ padding: "10px 8px", color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>{d.ip_address || "—"}</td>
+                      <td style={{ padding: "10px 8px", color: "#cbd5e1", fontWeight: 700 }}>{d.guess_type || "other"}</td>
+                      <td style={{ padding: "10px 8px", color: "#94a3b8", fontFamily: "monospace" }}>{ports || "—"}</td>
+                      <td style={{ padding: "10px 8px", color: "#94a3b8" }}>{d.last_seen ? timeAgoPtBR(d.last_seen) : "—"}</td>
+                      <td style={{ padding: "10px 8px", textAlign: "right" }}>
+                        {adopted ? (
+                          <span style={S.badge("#22c55e")}>Adicionado</span>
+                        ) : (
+                          <button
+                            style={S.btnSm("primary")}
+                            onClick={async () => {
+                              const defName = d.hostname || `${(d.guess_type || "device")}-${(d.ip_address || "").replace(/\./g, "-")}`;
+                              const name = prompt("Nome do dispositivo:", defName);
+                              if (!name) return;
+                              try {
+                                await api(`/discovered-devices/${d.id}/adopt`, { method: "POST", body: JSON.stringify({ name }) });
+                                load();
+                                loadDiscovered();
+                              } catch (e) {
+                                alert("Falha ao adicionar: " + (e?.error || e?.message || ""));
+                              }
+                            }}
+                          >
+                            + Adicionar
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
