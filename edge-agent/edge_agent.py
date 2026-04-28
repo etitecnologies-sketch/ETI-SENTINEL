@@ -10,6 +10,10 @@ import requests
 import shutil
 import json
 
+try:
+    import psutil
+except Exception:
+    psutil = None
 
 def _bool(v: str) -> bool:
     return str(v or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -24,6 +28,53 @@ def _proc_name(args):
 
 def _spawn(args, env):
     return subprocess.Popen(args, env=env, cwd=str(Path(args[-1]).resolve().parent))
+
+
+def _kill_stale_processes(match: str) -> None:
+    if not psutil:
+        return
+    me = os.getpid()
+    for p in psutil.process_iter(attrs=["pid", "cmdline"]):
+        try:
+            pid = int(p.info.get("pid") or 0)
+            if not pid or pid == me:
+                continue
+            cmdline = p.info.get("cmdline") or []
+            cmd = " ".join(str(x or "") for x in cmdline)
+            if match not in cmd:
+                continue
+            try:
+                psutil.Process(pid).terminate()
+            except Exception:
+                pass
+        except Exception:
+            continue
+
+
+def _cleanup_orphans(here: Path, env: dict) -> None:
+    if not psutil:
+        return
+    port = int(_sanitize(env.get("AGENT_API_PORT") or "8808") or 8808)
+    for c in psutil.net_connections(kind="tcp"):
+        try:
+            if c.status != psutil.CONN_LISTEN:
+                continue
+            if not c.laddr or int(c.laddr.port) != port:
+                continue
+            pid = int(c.pid or 0)
+            if not pid or pid == os.getpid():
+                continue
+            proc = psutil.Process(pid)
+            cmd = " ".join(proc.cmdline() or [])
+            if "agent_api.py" in cmd:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+        except Exception:
+            continue
+
+    _kill_stale_processes(str(here / "agent_api.py"))
 
 
 def _sanitize(s) -> str:
@@ -154,6 +205,8 @@ def main() -> None:
     enable_onvif = _bool(env.get("ENABLE_ONVIF_COLLECTOR", "1"))
     enable_discovery = _bool(env.get("ENABLE_DISCOVERY", "1"))
     enable_api = _bool(env.get("ENABLE_AGENT_API", "1"))
+
+    _cleanup_orphans(here, env)
 
     specs = []
     if enable_device:
