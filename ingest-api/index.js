@@ -218,7 +218,22 @@ app.post(
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 app.use(xmlparser({ explicitArray: false, normalize: true })); // Suporte para XML (Intelbras/Hikvision)
-app.use(cors({ origin: "*", credentials: true }));
+const corsOriginRaw = process.env.CORS_ORIGIN || "*";
+const corsOrigin = corsOriginRaw
+  .split(",")
+  .map((s) => sanitize(s))
+  .filter(Boolean);
+
+const corsOptions = {
+  origin: corsOrigin.length === 0 ? "*" : corsOrigin,
+  credentials: corsOrigin.length > 0 && !(corsOrigin.length === 1 && corsOrigin[0] === "*"),
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-device-token", "x-collector-key", "x-event-source"],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 if (hasFrontend) {
   app.use(express.static(frontendDistDir, { index: false }));
