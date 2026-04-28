@@ -788,36 +788,44 @@ app.get("/collector/onvif-config", async (req, res) => {
   if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
   if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
 
-  const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
-  const params = [];
-  let where = "oc.enabled=TRUE AND oc.host <> ''";
-  if (cid) { params.push(cid); where += ` AND d.client_id=$${params.length}`; }
+  try {
+    const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
+    const params = [];
+    let where = "oc.enabled=TRUE AND oc.host <> ''";
+    if (cid) {
+      params.push(cid);
+      where += ` AND d.client_id=$${params.length}`;
+    }
 
-  const r = await pool.query(
-    `
-    SELECT d.id as device_id, d.name, d.client_id, d.token,
-           oc.host, oc.port, oc.username, oc.password_enc, oc.channel_map
-    FROM onvif_configs oc
-    JOIN devices d ON d.id = oc.device_id
-    WHERE ${where}
-    ORDER BY d.id ASC
-    `,
-    params
-  );
+    const r = await pool.query(
+      `
+      SELECT d.id as device_id, d.name, d.client_id, d.token,
+             oc.host, oc.port, oc.username, oc.password_enc, oc.channel_map
+      FROM onvif_configs oc
+      JOIN devices d ON d.id = oc.device_id
+      WHERE ${where}
+      ORDER BY d.id ASC
+      `,
+      params
+    );
 
-  res.json(
-    r.rows.map((row) => ({
-      device_id: row.device_id,
-      name: row.name,
-      client_id: row.client_id,
-      token: row.token,
-      host: row.host,
-      port: row.port,
-      username: row.username,
-      password: decOnvif(row.password_enc),
-      channel_map: row.channel_map || {},
-    }))
-  );
+    res.json(
+      r.rows.map((row) => ({
+        device_id: row.device_id,
+        name: row.name,
+        client_id: row.client_id,
+        token: row.token,
+        host: row.host,
+        port: row.port,
+        username: row.username,
+        password: decOnvif(row.password_enc),
+        channel_map: row.channel_map || {},
+      }))
+    );
+  } catch (e) {
+    console.error("/collector/onvif-config error:", e.message);
+    res.status(500).json({ error: "Failed to fetch onvif config" });
+  }
 });
 
 app.get("/collector/rtsp-config", async (req, res) => {
@@ -825,34 +833,42 @@ app.get("/collector/rtsp-config", async (req, res) => {
   if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
   if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
 
-  const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
-  const params = [];
-  let where = "rc.enabled=TRUE AND jsonb_array_length(rc.streams) > 0";
-  if (cid) { params.push(cid); where += ` AND d.client_id=$${params.length}`; }
+  try {
+    const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
+    const params = [];
+    let where = "rc.enabled=TRUE AND jsonb_typeof(rc.streams)='array' AND jsonb_array_length(rc.streams) > 0";
+    if (cid) {
+      params.push(cid);
+      where += ` AND d.client_id=$${params.length}`;
+    }
 
-  const r = await pool.query(
-    `
-    SELECT d.id as device_id, d.name, d.client_id, d.token,
-           rc.username, rc.password_enc, rc.streams
-    FROM rtsp_configs rc
-    JOIN devices d ON d.id = rc.device_id
-    WHERE ${where}
-    ORDER BY d.id ASC
-    `,
-    params
-  );
+    const r = await pool.query(
+      `
+      SELECT d.id as device_id, d.name, d.client_id, d.token,
+             rc.username, rc.password_enc, rc.streams
+      FROM rtsp_configs rc
+      JOIN devices d ON d.id = rc.device_id
+      WHERE ${where}
+      ORDER BY d.id ASC
+      `,
+      params
+    );
 
-  res.json(
-    r.rows.map((row) => ({
-      device_id: row.device_id,
-      name: row.name,
-      client_id: row.client_id,
-      token: row.token,
-      username: row.username,
-      password: decOnvif(row.password_enc),
-      streams: row.streams || [],
-    }))
-  );
+    res.json(
+      r.rows.map((row) => ({
+        device_id: row.device_id,
+        name: row.name,
+        client_id: row.client_id,
+        token: row.token,
+        username: row.username,
+        password: decOnvif(row.password_enc),
+        streams: row.streams || [],
+      }))
+    );
+  } catch (e) {
+    console.error("/collector/rtsp-config error:", e.message);
+    res.status(500).json({ error: "Failed to fetch rtsp config" });
+  }
 });
 
 // ── Solar Inverters ──────────────────────────────────────────
