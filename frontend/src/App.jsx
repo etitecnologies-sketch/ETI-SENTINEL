@@ -52,19 +52,31 @@ function useIsMobile() {
   return isMobile;
 }
 
+const sanitizeBaseUrl = (raw) => {
+  let s = String(raw || "").trim();
+  s = s.replace(/`/g, "").trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  if (!s) return s;
+  if (s.startsWith("http://") || s.startsWith("https://")) return s.replace(/\/$/, "");
+  if (s.includes(".")) return ("https://" + s).replace(/\/$/, "");
+  return s.replace(/\/$/, "");
+};
+
 const getInitialAPI = () => {
   // 1. Prioridade para override manual via URL (ex: ?api=https://...)
   const urlParams = new URLSearchParams(window.location.search);
   const urlApi = urlParams.get("api");
-  if (urlApi && urlApi.length > 5) return urlApi;
+  if (urlApi && urlApi.length > 5) return sanitizeBaseUrl(urlApi);
 
   // 2. Verifica se há uma URL salva no localStorage
   const savedApi = localStorage.getItem("ETI_API_URL");
-  if (savedApi && savedApi.length > 5) return savedApi;
+  if (savedApi && savedApi.length > 5) return sanitizeBaseUrl(savedApi);
 
   // 3. Verifica variável de ambiente do Vite
   const envApi = import.meta.env.VITE_API_URL;
-  if (envApi && envApi.length > 5) return envApi;
+  if (envApi && envApi.length > 5) return sanitizeBaseUrl(envApi);
   
   const h = window.location.hostname;
   
@@ -83,7 +95,7 @@ const getInitialAPI = () => {
   }
   
   // 6. Fallback final: Mesma origem
-  return window.location.origin;
+  return sanitizeBaseUrl(window.location.origin);
 };
 
 function LogoMark({ size = 52 }) {
@@ -197,7 +209,7 @@ function timeAgoPtBR(date) {
   return `${days}d atrás`;
 }
 
-const API = getInitialAPI().replace(/\/$/, "");
+const API = sanitizeBaseUrl(getInitialAPI());
 
 console.log("🚀 DEBUG API URL:", `|${API}|`); // O pipe | ajuda a ver se tem espaço sobrando
 
@@ -246,6 +258,11 @@ async function api(path, opts = {}) {
     return data;
   } catch (err) {
     console.error(`Fetch Error ${path}:`, err);
+    if (err?.name === "TypeError" && String(err?.message || "").includes("Failed to fetch")) {
+      throw {
+        error: `Failed to fetch. Verifique se a API está acessível em ${API} e se VITE_API_URL/ETI_API_URL não tem aspas/crases.`,
+      };
+    }
     throw err;
   }
 }
