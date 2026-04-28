@@ -162,10 +162,23 @@ def _ensure_env(edge_dir: Path) -> Path:
 
 
 def _configure_env(env_path: Path) -> None:
+    def sanitize_value(s: str) -> str:
+        v = (s or "").strip()
+        v = v.strip("`").strip('"').strip("'").strip()
+        return v
+
+    def sanitize_url(s: str) -> str:
+        v = sanitize_value(s)
+        if not v:
+            return v
+        if not v.startswith("http://") and not v.startswith("https://"):
+            v = "https://" + v
+        return v.rstrip("/")
+
     txt = _read_text(env_path)
-    ingest = input("INGEST_API_URL (ex: https://eti-sentinel-production.up.railway.app): ").strip()
-    key = input("COLLECTOR_KEY: ").strip()
-    cid = input("CLIENT_ID (opcional): ").strip()
+    ingest = sanitize_url(input("INGEST_API_URL (ex: https://eti-sentinel-production.up.railway.app): ").strip())
+    key = sanitize_value(input("COLLECTOR_KEY: ").strip())
+    cid = sanitize_value(input("CLIENT_ID (opcional): ").strip())
     if ingest:
         txt = _set_env_kv(txt, "INGEST_API_URL", ingest)
     if key:

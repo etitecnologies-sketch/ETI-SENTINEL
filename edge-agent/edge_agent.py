@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import requests
 import shutil
+import json
 
 
 def _bool(v: str) -> bool:
@@ -45,6 +46,21 @@ def _short_body(text: str, limit: int = 240) -> str:
     return t[:limit] + "..."
 
 
+def _redact(obj):
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            kl = str(k).lower()
+            if kl in {"password", "password_enc", "token", "jwt", "secret", "collector_key"}:
+                out[k] = "***"
+            else:
+                out[k] = _redact(v)
+        return out
+    if isinstance(obj, list):
+        return [_redact(x) for x in obj]
+    return obj
+
+
 def run_check(here: Path, env: dict) -> int:
     timeout = float(env.get("CHECK_TIMEOUT_SECONDS") or 6)
     ingest_api_url = _sanitize_base_url(env.get("INGEST_API_URL") or "")
@@ -70,6 +86,13 @@ def run_check(here: Path, env: dict) -> int:
         url = ingest_api_url + path
         try:
             r = requests.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
+            ct = str(r.headers.get("content-type") or "")
+            if "application/json" in ct:
+                try:
+                    data = r.json()
+                    return r.status_code, json.dumps(_redact(data), ensure_ascii=False)[:240]
+                except Exception:
+                    return r.status_code, _short_body(r.text)
             return r.status_code, _short_body(r.text)
         except Exception as e:
             return 0, _short_body(str(e))
