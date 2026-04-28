@@ -928,6 +928,58 @@ app.get("/collector/rtsp-config", async (req, res) => {
   }
 });
 
+app.get("/collector/devices", async (req, res) => {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
+  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
+    const params = [];
+    let where = "1=1";
+    if (cid) {
+      params.push(cid);
+      where += ` AND client_id=$${params.length}`;
+    }
+
+    const r = await pool.query(
+      `
+      SELECT
+        id as device_id,
+        name,
+        client_id,
+        token,
+        ip_address,
+        ddns_address,
+        monitor_ping,
+        monitor_port,
+        device_type
+      FROM devices
+      WHERE ${where}
+      ORDER BY id ASC
+      `,
+      params
+    );
+
+    res.json(
+      r.rows.map((row) => ({
+        device_id: row.device_id,
+        name: row.name,
+        client_id: row.client_id,
+        token: row.token,
+        ip_address: row.ip_address || "",
+        ddns_address: row.ddns_address || "",
+        monitor_ping: row.monitor_ping === true,
+        monitor_port: parseInt(row.monitor_port) || 0,
+        device_type: row.device_type || "",
+      }))
+    );
+  } catch (e) {
+    console.error("/collector/devices error:", e.message);
+    res.status(500).json({ error: "Failed to fetch devices", detail: e.message });
+  }
+});
+
 // ── Solar Inverters ──────────────────────────────────────────
 app.get("/solar/inverters", auth, async (req, res) => {
   try {
