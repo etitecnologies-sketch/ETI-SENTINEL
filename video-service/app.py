@@ -54,6 +54,7 @@ DEFAULT_TIMEOUT_SECONDS = _env_int("DEFAULT_TIMEOUT_SECONDS", 8)
 HLS_DIR = Path(os.getenv("HLS_DIR") or "/tmp/eti-sentinel-hls")
 HLS_SEG_TIME = _env_int("HLS_SEG_TIME", 2)
 HLS_LIST_SIZE = _env_int("HLS_LIST_SIZE", 6)
+HLS_READY_WAIT_SECONDS = _env_int("HLS_READY_WAIT_SECONDS", 15)
 
 
 def _api_headers() -> Dict[str, str]:
@@ -256,6 +257,7 @@ class HlsProcess:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         playlist = str(self.output_dir / "index.m3u8")
         seg = str(self.output_dir / "seg_%05d.ts")
+        log_path = self.output_dir / "ffmpeg.log"
         t = (self.transport or "tcp").lower()
         if t not in {"tcp", "udp"}:
             t = "tcp"
@@ -283,7 +285,30 @@ class HlsProcess:
             seg,
             playlist,
         ]
-        self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log_f = open(log_path, "ab", buffering=0)
+        self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=log_f)
+
+
+def _tail_file(path: Path, max_bytes: int = 4096) -> str:
+    try:
+        if not path.exists():
+            return ""
+        size = path.stat().st_size
+        start = max(0, size - max_bytes)
+        with path.open("rb") as f:
+            f.seek(start)
+            data = f.read(max_bytes)
+        return data.decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _ffmpeg_available() -> bool:
+    try:
+        r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=3)
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 app = FastAPI(title="ETI SENTINEL Video Service", version="0.1.0")
@@ -299,6 +324,26 @@ def health() -> Dict[str, Any]:
         "ingest_api": INGEST_API_URL,
         "collector_key_configured": bool(COLLECTOR_KEY),
         "admin_token_configured": bool(ADMIN_TOKEN),
+        "ffmpeg_available": _ffmpeg_available(),
+        "hls_dir": str(HLS_DIR),
+    }
+
+
+@app.get("/hls/{device_id}/{channel}/status")
+def hls_status(device_id: int, channel: int) -> Dict[str, Any]:
+    key = (device_id, channel)
+    with _hls_lock:
+        proc = _hls.get(key)
+    if not proc:
+        return {"device_id": device_id, "channel": channel, "running": False, "status": "not_started"}
+    log_tail = _tail_file(proc.output_dir / "ffmpeg.log")
+    return {
+        "device_id": device_id,
+        "channel": channel,
+        "running": proc.is_running(),
+        "started_at": proc.started_at,
+        "output_dir": str(proc.output_dir),
+        "log_tail": log_tail[-2000:],
     }
 
 
@@ -426,12 +471,19 @@ def _ensure_hls(device_id: int, channel: int) -> HlsProcess:
 def hls_playlist(device_id: int, channel: int) -> Response:
     proc = _ensure_hls(device_id, channel)
     playlist = proc.output_dir / "index.m3u8"
-    for _ in range(20):
+    deadline = time.time() + max(3, HLS_READY_WAIT_SECONDS)
+    while time.time() < deadline:
         if playlist.exists() and playlist.stat().st_size > 0:
             break
-        time.sleep(0.2)
+        if not proc.is_running():
+            break
+        time.sleep(0.25)
     if not playlist.exists():
-        raise HTTPException(status_code=502, detail="HLS not ready")
+        log_tail = _tail_file(proc.output_dir / "ffmpeg.log")
+        hint = ""
+        if "192.168." in proc.rtsp_url or "10." in proc.rtsp_url or "172.16." in proc.rtsp_url:
+            hint = " (dica: IP privado; Railway não alcança sua LAN sem VPN/túnel)"
+        raise HTTPException(status_code=502, detail=f"HLS not ready{hint}. ffmpeg log: {log_tail[-800:]}")
     return FileResponse(str(playlist), media_type="application/vnd.apple.mpegurl")
 
 
