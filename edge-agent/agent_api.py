@@ -163,6 +163,22 @@ def _run_scan(job_id: str, store: JobStore, env: Dict[str, str], user: str, pass
 class Handler(BaseHTTPRequestHandler):
     server_version = "eti-sentinel-edge"
 
+    def handle(self) -> None:
+        try:
+            return super().handle()
+        except Exception:
+            _append_log(self.server.log_path, traceback.format_exc())
+            try:
+                raw = json.dumps({"error": "internal_error"}).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+            except Exception:
+                pass
+            return
+
     def _json(self, code: int, obj: Any) -> None:
         raw = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)

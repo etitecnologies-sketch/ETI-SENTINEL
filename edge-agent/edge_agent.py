@@ -27,7 +27,9 @@ def _spawn(args, env):
 
 
 def _sanitize(s) -> str:
-    return str(s or "").strip().strip("`").strip('"').strip("'").strip()
+    v = str(s or "").strip()
+    v = v.replace("`", "").replace('"', "").replace("'", "").strip()
+    return v
 
 
 def _sanitize_base_url(url: str) -> str:
