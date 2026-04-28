@@ -27,7 +27,17 @@ def _sanitize(s: Any) -> str:
     return str(s or "").strip()
 
 
-INGEST_API_URL = os.getenv("INGEST_API_URL") or "http://localhost:3000"
+def _normalize_base_url(raw: str, default: str) -> str:
+    s = (raw or "").strip()
+    s = s.replace("`", "").strip()
+    if not s:
+        return default
+    if s.startswith("http://") or s.startswith("https://"):
+        return s.rstrip("/")
+    return ("https://" + s).rstrip("/")
+
+
+INGEST_API_URL = _normalize_base_url(os.getenv("INGEST_API_URL") or "", "http://localhost:3000")
 COLLECTOR_KEY = os.getenv("COLLECTOR_KEY") or ""
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or ""
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -71,9 +81,12 @@ def _post_push(token: str, event_type: str, channel: int, description: str, seve
 
 def _get_devices() -> List[Dict[str, Any]]:
     url = INGEST_API_URL.rstrip("/") + "/devices"
-    r = requests.get(url, headers=_api_headers(), timeout=15)
-    r.raise_for_status()
-    return r.json() or []
+    try:
+        r = requests.get(url, headers=_api_headers(), timeout=15)
+        r.raise_for_status()
+        return r.json() or []
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch devices: {e}")
 
 
 def _create_camera_device(ip: str, xaddr: str) -> Optional[Dict[str, Any]]:
@@ -95,10 +108,13 @@ def _create_camera_device(ip: str, xaddr: str) -> Optional[Dict[str, Any]]:
     }
     if CLIENT_ID and str(CLIENT_ID).isdigit():
         body["client_id"] = int(CLIENT_ID)
-    r = requests.post(url, headers=_api_headers(), json=body, timeout=15)
-    if r.status_code >= 400:
+    try:
+        r = requests.post(url, headers=_api_headers(), json=body, timeout=15)
+        if r.status_code >= 400:
+            return None
+        return r.json()
+    except requests.RequestException:
         return None
-    return r.json()
 
 
 def _probe_ws_discovery(timeout_seconds: int) -> List[Dict[str, Any]]:
@@ -158,9 +174,18 @@ def _fetch_rtsp_configs(client_id: Optional[int]) -> List[Dict[str, Any]]:
     params: Dict[str, Any] = {}
     if client_id:
         params["client_id"] = client_id
-    r = requests.get(url, headers=_collector_headers(), params=params, timeout=15)
-    r.raise_for_status()
-    return r.json() or []
+    try:
+        r = requests.get(url, headers=_collector_headers(), params=params, timeout=15)
+        if r.status_code == 401:
+            raise HTTPException(status_code=401, detail="Unauthorized (COLLECTOR_KEY inválido)")
+        if r.status_code == 503:
+            raise HTTPException(status_code=503, detail="Collector key not configured no ingest-api")
+        r.raise_for_status()
+        return r.json() or []
+    except HTTPException:
+        raise
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch rtsp-config: {e}")
 
 
 def _build_rtsp_url(url: str, username: str, password: str) -> str:

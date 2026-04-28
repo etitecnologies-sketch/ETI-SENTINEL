@@ -42,6 +42,23 @@ Para o **ETI SENTINEL** rodar com máxima estabilidade 24/7, recomendamos criar 
 
 ---
 
+## 6. Video-Service (Etapa 2 — Descoberta/Health/HLS)
+- **New** -> **GitHub Repo** -> Selecione o repo.
+- Em **Settings** -> **Root Directory**, coloque: `video-service`.
+- **Variables**:
+  - `INGEST_API_URL`: URL interna do ingest-api no Railway (ex: `https://seu-ingest-api.up.railway.app`)
+  - `COLLECTOR_KEY`: mesma chave usada pelos collectors
+  - `CLIENT_ID`: (opcional) filtra RTSP configs por cliente
+  - `ADMIN_TOKEN`: JWT de um superadmin (opcional, necessário para auto-registrar câmeras via discovery)
+  - `DISCOVERY_INTERVAL_SECONDS`: 0 desliga discovery (ex: `60` para buscar a cada 1 min)
+  - `HEALTH_INTERVAL_SECONDS`: 0 desliga health (ex: `30` para monitorar RTSP)
+
+### Endpoints úteis
+- `/health`
+- `/discover?run_register=true` (requer `ADMIN_TOKEN`)
+- `/streams`
+- `/hls/{device_id}/{channel}/index.m3u8`
+
 ### Por que separar?
 1. **Logs Individuais**: Se a API cair, você sabe exatamente o porquê sem afetar o Frontend.
 2. **Escalabilidade**: Você pode dar mais memória apenas para o Banco ou para a API.
