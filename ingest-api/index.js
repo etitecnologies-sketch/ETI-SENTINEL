@@ -728,10 +728,12 @@ app.put("/devices/:id/onvif", auth, requireAccessLevel(2), async (req, res) => {
     if (password === "") password_enc = "";
     else if (typeof password === "string" && password.length > 0) password_enc = encOnvif(password);
 
+    const channelMapJson = JSON.stringify(channel_map || {});
+
     await pool.query(
       `
       INSERT INTO onvif_configs (device_id, enabled, host, port, username, password_enc, channel_map, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())
       ON CONFLICT (device_id) DO UPDATE SET
         enabled=EXCLUDED.enabled,
         host=EXCLUDED.host,
@@ -741,7 +743,7 @@ app.put("/devices/:id/onvif", auth, requireAccessLevel(2), async (req, res) => {
         channel_map=EXCLUDED.channel_map,
         updated_at=NOW()
       `,
-      [deviceId, enabled, host, port, username, password_enc, channel_map]
+      [deviceId, enabled, host, port, username, password_enc, channelMapJson]
     );
 
     res.json({ ok: true });
@@ -800,10 +802,12 @@ app.put("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
     if (password === "") password_enc = "";
     else if (typeof password === "string" && password.length > 0) password_enc = encOnvif(password);
 
+    const streamsJson = JSON.stringify(streams || []);
+
     await pool.query(
       `
       INSERT INTO rtsp_configs (device_id, enabled, username, password_enc, streams, updated_at)
-      VALUES ($1,$2,$3,$4,$5,NOW())
+      VALUES ($1,$2,$3,$4,$5::jsonb,NOW())
       ON CONFLICT (device_id) DO UPDATE SET
         enabled=EXCLUDED.enabled,
         username=EXCLUDED.username,
@@ -811,7 +815,7 @@ app.put("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
         streams=EXCLUDED.streams,
         updated_at=NOW()
       `,
-      [deviceId, enabled, username, password_enc, streams]
+      [deviceId, enabled, username, password_enc, streamsJson]
     );
 
     res.json({ ok: true });
