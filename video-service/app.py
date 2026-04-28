@@ -176,16 +176,20 @@ def _fetch_rtsp_configs(client_id: Optional[int]) -> List[Dict[str, Any]]:
         params["client_id"] = client_id
     try:
         r = requests.get(url, headers=_collector_headers(), params=params, timeout=15)
-        if r.status_code == 401:
-            raise HTTPException(status_code=401, detail="Unauthorized (COLLECTOR_KEY inválido)")
-        if r.status_code == 503:
-            raise HTTPException(status_code=503, detail="Collector key not configured no ingest-api")
-        r.raise_for_status()
+        if r.status_code != 200:
+            body = (r.text or "").strip()
+            if len(body) > 400:
+                body = body[:400] + "…"
+            if r.status_code == 401:
+                raise HTTPException(status_code=401, detail=f"Unauthorized (COLLECTOR_KEY inválido). ingest-api respondeu: {body}")
+            if r.status_code == 503:
+                raise HTTPException(status_code=503, detail=f"Collector key não configurado no ingest-api. ingest-api respondeu: {body}")
+            raise HTTPException(status_code=502, detail=f"ingest-api respondeu {r.status_code} em /collector/rtsp-config: {body}")
         return r.json() or []
     except HTTPException:
         raise
     except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch rtsp-config: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch rtsp-config ({url}): {e}")
 
 
 def _build_rtsp_url(url: str, username: str, password: str) -> str:
