@@ -836,7 +836,7 @@ app.get("/collector/rtsp-config", async (req, res) => {
   try {
     const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
     const params = [];
-    let where = "rc.enabled=TRUE AND jsonb_typeof(rc.streams)='array' AND jsonb_array_length(rc.streams) > 0";
+    let where = "rc.enabled=TRUE";
     if (cid) {
       params.push(cid);
       where += ` AND d.client_id=$${params.length}`;
@@ -844,12 +844,27 @@ app.get("/collector/rtsp-config", async (req, res) => {
 
     const r = await pool.query(
       `
+      WITH cfg AS (
+        SELECT
+          d.id as device_id,
+          d.name,
+          d.client_id,
+          d.token,
+          rc.username,
+          rc.password_enc,
+          CASE
+            WHEN jsonb_typeof(rc.streams) = 'array' THEN rc.streams
+            ELSE '[]'::jsonb
+          END AS streams
+        FROM rtsp_configs rc
+        JOIN devices d ON d.id = rc.device_id
+        WHERE ${where}
+      )
       SELECT d.id as device_id, d.name, d.client_id, d.token,
-             rc.username, rc.password_enc, rc.streams
-      FROM rtsp_configs rc
-      JOIN devices d ON d.id = rc.device_id
-      WHERE ${where}
-      ORDER BY d.id ASC
+             d.username, d.password_enc, d.streams
+      FROM cfg d
+      WHERE jsonb_array_length(d.streams) > 0
+      ORDER BY d.device_id ASC
       `,
       params
     );
