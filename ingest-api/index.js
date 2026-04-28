@@ -703,47 +703,52 @@ app.get("/devices/:id/onvif", auth, requireAccessLevel(2), async (req, res) => {
 });
 
 app.put("/devices/:id/onvif", auth, requireAccessLevel(2), async (req, res) => {
-  const deviceId = parseInt(req.params.id);
-  const access = await assertDeviceAccess(req, deviceId);
-  if (!access.ok) return res.status(access.status).json({ error: access.error });
+  try {
+    const deviceId = parseInt(req.params.id);
+    const access = await assertDeviceAccess(req, deviceId);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
 
-  const enabled = req.body.enabled === true;
-  const host = String(req.body.host || "").trim();
-  const port = parseInt(req.body.port) || 80;
-  const username = String(req.body.username || "");
-  const password = req.body.password;
-  let channel_map = req.body.channel_map;
+    const enabled = req.body.enabled === true;
+    const host = String(req.body.host || "").trim();
+    const port = parseInt(req.body.port) || 80;
+    const username = String(req.body.username || "");
+    const password = req.body.password;
+    let channel_map = req.body.channel_map;
 
-  if (enabled && !host) return res.status(400).json({ error: "Host required" });
-  if (port < 1 || port > 65535) return res.status(400).json({ error: "Invalid port" });
+    if (enabled && !host) return res.status(400).json({ error: "Host required" });
+    if (port < 1 || port > 65535) return res.status(400).json({ error: "Invalid port" });
 
-  if (typeof channel_map === "string") {
-    try { channel_map = JSON.parse(channel_map || "{}"); } catch { return res.status(400).json({ error: "Invalid channel_map JSON" }); }
+    if (typeof channel_map === "string") {
+      try { channel_map = JSON.parse(channel_map || "{}"); } catch { return res.status(400).json({ error: "Invalid channel_map JSON" }); }
+    }
+    if (!channel_map || typeof channel_map !== "object") channel_map = {};
+
+    const existing = await pool.query("SELECT password_enc FROM onvif_configs WHERE device_id=$1", [deviceId]);
+    let password_enc = existing.rows[0]?.password_enc || "";
+    if (password === "") password_enc = "";
+    else if (typeof password === "string" && password.length > 0) password_enc = encOnvif(password);
+
+    await pool.query(
+      `
+      INSERT INTO onvif_configs (device_id, enabled, host, port, username, password_enc, channel_map, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+      ON CONFLICT (device_id) DO UPDATE SET
+        enabled=EXCLUDED.enabled,
+        host=EXCLUDED.host,
+        port=EXCLUDED.port,
+        username=EXCLUDED.username,
+        password_enc=EXCLUDED.password_enc,
+        channel_map=EXCLUDED.channel_map,
+        updated_at=NOW()
+      `,
+      [deviceId, enabled, host, port, username, password_enc, channel_map]
+    );
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("/devices/:id/onvif error:", e.message);
+    res.status(500).json({ error: "Failed to save ONVIF config", detail: e.message });
   }
-  if (!channel_map || typeof channel_map !== "object") channel_map = {};
-
-  const existing = await pool.query("SELECT password_enc FROM onvif_configs WHERE device_id=$1", [deviceId]);
-  let password_enc = existing.rows[0]?.password_enc || "";
-  if (password === "") password_enc = "";
-  else if (typeof password === "string" && password.length > 0) password_enc = encOnvif(password);
-
-  await pool.query(
-    `
-    INSERT INTO onvif_configs (device_id, enabled, host, port, username, password_enc, channel_map, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-    ON CONFLICT (device_id) DO UPDATE SET
-      enabled=EXCLUDED.enabled,
-      host=EXCLUDED.host,
-      port=EXCLUDED.port,
-      username=EXCLUDED.username,
-      password_enc=EXCLUDED.password_enc,
-      channel_map=EXCLUDED.channel_map,
-      updated_at=NOW()
-    `,
-    [deviceId, enabled, host, port, username, password_enc, channel_map]
-  );
-
-  res.json({ ok: true });
 });
 
 app.get("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
@@ -758,52 +763,62 @@ app.get("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
 });
 
 app.put("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
-  const deviceId = parseInt(req.params.id);
-  const access = await assertDeviceAccess(req, deviceId);
-  if (!access.ok) return res.status(access.status).json({ error: access.error });
+  try {
+    const deviceId = parseInt(req.params.id);
+    const access = await assertDeviceAccess(req, deviceId);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
 
-  const enabled = req.body.enabled === true;
-  const username = String(req.body.username || "");
-  const password = req.body.password;
-  let streams = req.body.streams;
+    const enabled = req.body.enabled === true;
+    const username = String(req.body.username || "");
+    const password = req.body.password;
+    let streams = req.body.streams;
 
-  if (typeof streams === "string") {
-    try { streams = JSON.parse(streams || "[]"); } catch { return res.status(400).json({ error: "Invalid streams JSON" }); }
+    if (typeof streams === "string") {
+      try { streams = JSON.parse(streams || "[]"); } catch { return res.status(400).json({ error: "Invalid streams JSON" }); }
+    }
+    if (streams && typeof streams === "object" && !Array.isArray(streams)) streams = [streams];
+    if (!Array.isArray(streams)) streams = [];
+    streams = streams
+      .filter((s) => s && typeof s === "object")
+      .map((s) => ({
+        channel: parseInt(s.channel) || 0,
+        name: String(s.name || ""),
+        url: String(s.url || "").trim(),
+        enabled: s.enabled !== false,
+        timeout_seconds: parseInt(s.timeout_seconds) || 8,
+        interval_seconds: parseInt(s.interval_seconds) || 30,
+        transport: String(s.transport || "tcp"),
+      }))
+      .filter((s) => s.url);
+
+    if (enabled && streams.length === 0) {
+      return res.status(400).json({ error: "At least one RTSP stream is required" });
+    }
+
+    const existing = await pool.query("SELECT password_enc FROM rtsp_configs WHERE device_id=$1", [deviceId]);
+    let password_enc = existing.rows[0]?.password_enc || "";
+    if (password === "") password_enc = "";
+    else if (typeof password === "string" && password.length > 0) password_enc = encOnvif(password);
+
+    await pool.query(
+      `
+      INSERT INTO rtsp_configs (device_id, enabled, username, password_enc, streams, updated_at)
+      VALUES ($1,$2,$3,$4,$5,NOW())
+      ON CONFLICT (device_id) DO UPDATE SET
+        enabled=EXCLUDED.enabled,
+        username=EXCLUDED.username,
+        password_enc=EXCLUDED.password_enc,
+        streams=EXCLUDED.streams,
+        updated_at=NOW()
+      `,
+      [deviceId, enabled, username, password_enc, streams]
+    );
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("/devices/:id/rtsp error:", e.message);
+    res.status(500).json({ error: "Failed to save RTSP config", detail: e.message });
   }
-  if (!Array.isArray(streams)) streams = [];
-  streams = streams
-    .filter((s) => s && typeof s === "object")
-    .map((s) => ({
-      channel: parseInt(s.channel) || 0,
-      name: String(s.name || ""),
-      url: String(s.url || "").trim(),
-      enabled: s.enabled !== false,
-      timeout_seconds: parseInt(s.timeout_seconds) || 8,
-      interval_seconds: parseInt(s.interval_seconds) || 30,
-      transport: String(s.transport || "tcp"),
-    }))
-    .filter((s) => s.url);
-
-  const existing = await pool.query("SELECT password_enc FROM rtsp_configs WHERE device_id=$1", [deviceId]);
-  let password_enc = existing.rows[0]?.password_enc || "";
-  if (password === "") password_enc = "";
-  else if (typeof password === "string" && password.length > 0) password_enc = encOnvif(password);
-
-  await pool.query(
-    `
-    INSERT INTO rtsp_configs (device_id, enabled, username, password_enc, streams, updated_at)
-    VALUES ($1,$2,$3,$4,$5,NOW())
-    ON CONFLICT (device_id) DO UPDATE SET
-      enabled=EXCLUDED.enabled,
-      username=EXCLUDED.username,
-      password_enc=EXCLUDED.password_enc,
-      streams=EXCLUDED.streams,
-      updated_at=NOW()
-    `,
-    [deviceId, enabled, username, password_enc, streams]
-  );
-
-  res.json({ ok: true });
 });
 
 app.get("/collector/onvif-config", async (req, res) => {

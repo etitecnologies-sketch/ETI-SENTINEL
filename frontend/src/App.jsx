@@ -1090,6 +1090,8 @@ function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave
       if (id && (rtspLoaded || wantsRtsp)) {
         let streams = [];
         try { streams = JSON.parse(rtsp.streams_text || "[]"); } catch { throw { error: "streams inválido (JSON)" }; }
+        if (streams && typeof streams === "object" && !Array.isArray(streams)) streams = [streams];
+        if (!Array.isArray(streams)) streams = [];
         const body = {
           enabled: !!rtsp.enabled,
           username: rtsp.username || "",
