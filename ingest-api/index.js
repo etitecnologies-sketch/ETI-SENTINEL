@@ -860,7 +860,7 @@ app.get("/collector/rtsp-config", async (req, res) => {
         JOIN devices d ON d.id = rc.device_id
         WHERE ${where}
       )
-      SELECT d.id as device_id, d.name, d.client_id, d.token,
+      SELECT d.device_id, d.name, d.client_id, d.token,
              d.username, d.password_enc, d.streams
       FROM cfg d
       WHERE jsonb_array_length(d.streams) > 0
