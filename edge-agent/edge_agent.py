@@ -140,6 +140,7 @@ def main() -> None:
     enable_rtsp = _bool(env.get("ENABLE_RTSP_MONITOR", "1"))
     enable_onvif = _bool(env.get("ENABLE_ONVIF_COLLECTOR", "1"))
     enable_discovery = _bool(env.get("ENABLE_DISCOVERY", "1"))
+    enable_api = _bool(env.get("ENABLE_AGENT_API", "1"))
 
     specs = []
     if enable_device:
@@ -151,6 +152,8 @@ def main() -> None:
         specs.append([python, str(repo_root / "onvif-collector" / "onvif_collector.py")])
     if enable_discovery:
         specs.append([python, str(here / "discovery_agent.py")])
+    if enable_api:
+        specs.append([python, str(here / "agent_api.py")])
 
     if not specs:
         raise SystemExit("Nenhum módulo habilitado")
