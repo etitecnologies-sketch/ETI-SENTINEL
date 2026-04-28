@@ -477,7 +477,9 @@ async function initDB() {
 initDB();
 
 const JWT_SECRET = process.env.JWT_SECRET || "changeme-secret-jwt";
-const sanitize = (v) => v ? v.replace(/["'`\s]/g, "").trim() : "";
+function sanitize(v) {
+  return v ? String(v).replace(/["'`\s]/g, "").trim() : "";
+}
 const WEBSOCKET_URL = sanitize(process.env.WEBSOCKET_URL || "");
 const TG_TOKEN_GLOBAL = sanitize(process.env.TELEGRAM_TOKEN || "");
 const TG_CHAT_ID_GLOBAL = sanitize(process.env.TELEGRAM_CHAT_ID || "");
