@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import uuid
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -25,6 +26,19 @@ def _sanitize_base_url(url: str) -> str:
 
 def _bool(v: Any) -> bool:
     return str(v or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _append_log(path: Path, msg: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        path.write_text(path.read_text(encoding="utf-8") + f"[{ts}] {msg}\n", encoding="utf-8")
+    except Exception:
+        try:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            path.write_text(f"[{ts}] {msg}\n", encoding="utf-8")
+        except Exception:
+            pass
 
 
 class JobStore:
@@ -171,76 +185,99 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self) -> None:
-        path = (self.path or "").split("?")[0]
-        if path == "/health":
-            return self._json(200, {"ok": True})
-        if path == "/api/discover/cameras":
-            job = self.server.store.latest()
-            if not job:
-                return self._json(200, {"status": "idle", "cameras": [], "count": 0})
-            st = job.get("status")
-            if st == "running":
-                return self._json(200, {"status": "running", "job_id": job.get("job_id")})
-            if st == "error":
-                return self._json(200, {"status": "error", "job_id": job.get("job_id"), "error": job.get("error")})
-            res = job.get("result") or {}
-            return self._json(200, {"status": "done", "job_id": job.get("job_id"), **res})
+        try:
+            path = (self.path or "").split("?")[0]
+            if path == "/health":
+                return self._json(200, {"ok": True})
+            if path == "/api/discover/cameras":
+                job = self.server.store.latest()
+                if not job:
+                    return self._json(200, {"status": "idle", "cameras": [], "count": 0})
+                st = job.get("status")
+                if st == "running":
+                    return self._json(200, {"status": "running", "job_id": job.get("job_id")})
+                if st == "error":
+                    return self._json(200, {"status": "error", "job_id": job.get("job_id"), "error": job.get("error")})
+                res = job.get("result") or {}
+                return self._json(200, {"status": "done", "job_id": job.get("job_id"), **res})
 
-        if path.startswith("/api/discover/cameras/"):
-            jid = sanitize(path.rsplit("/", 1)[-1])
-            job = self.server.store.get(jid)
-            if not job:
-                return self._json(404, {"error": "not_found"})
-            st = job.get("status")
-            if st == "running":
-                return self._json(200, {"status": "running", "job_id": jid})
-            if st == "error":
-                return self._json(200, {"status": "error", "job_id": jid, "error": job.get("error")})
-            res = job.get("result") or {}
-            return self._json(200, {"status": "done", "job_id": jid, **res})
+            if path.startswith("/api/discover/cameras/"):
+                jid = sanitize(path.rsplit("/", 1)[-1])
+                job = self.server.store.get(jid)
+                if not job:
+                    return self._json(404, {"error": "not_found"})
+                st = job.get("status")
+                if st == "running":
+                    return self._json(200, {"status": "running", "job_id": jid})
+                if st == "error":
+                    return self._json(200, {"status": "error", "job_id": jid, "error": job.get("error")})
+                res = job.get("result") or {}
+                return self._json(200, {"status": "done", "job_id": jid, **res})
 
-        return self._json(404, {"error": "not_found"})
+            return self._json(404, {"error": "not_found"})
+        except Exception as e:
+            _append_log(self.server.log_path, traceback.format_exc())
+            try:
+                return self._json(500, {"error": "internal_error", "detail": sanitize(str(e))})
+            except Exception:
+                return
 
     def do_POST(self) -> None:
-        path = (self.path or "").split("?")[0]
-        if path == "/api/discover/cameras/scan":
-            body = self._read_json()
-            user = sanitize(body.get("user") or os.getenv("CAMERA_DEFAULT_USER") or "admin")
-            password = sanitize(body.get("password") or os.getenv("CAMERA_DEFAULT_PASS") or "")
-            timeout = body.get("timeout")
-            try:
-                timeout_f = float(timeout) if timeout is not None else float(os.getenv("CAMERA_SCAN_TIMEOUT") or 6)
-            except Exception:
-                timeout_f = 6.0
+        try:
+            path = (self.path or "").split("?")[0]
+            if path == "/api/discover/cameras/scan":
+                body = self._read_json()
+                user = sanitize(body.get("user") or os.getenv("CAMERA_DEFAULT_USER") or "admin")
+                password = sanitize(body.get("password") or os.getenv("CAMERA_DEFAULT_PASS") or "")
+                timeout = body.get("timeout")
+                try:
+                    timeout_f = float(timeout) if timeout is not None else float(os.getenv("CAMERA_SCAN_TIMEOUT") or 6)
+                except Exception:
+                    timeout_f = 6.0
 
-            jid = self.server.store.create()
-            t = threading.Thread(
-                target=_run_scan,
-                args=(jid, self.server.store, self.server.env, user, password, timeout_f),
-                daemon=True,
-            )
-            t.start()
-            return self._json(200, {"job_id": jid, "status": "running"})
-        return self._json(404, {"error": "not_found"})
+                jid = self.server.store.create()
+                t = threading.Thread(
+                    target=_run_scan,
+                    args=(jid, self.server.store, self.server.env, user, password, timeout_f),
+                    daemon=True,
+                )
+                t.start()
+                return self._json(200, {"job_id": jid, "status": "running"})
+            return self._json(404, {"error": "not_found"})
+        except Exception as e:
+            _append_log(self.server.log_path, traceback.format_exc())
+            try:
+                return self._json(500, {"error": "internal_error", "detail": sanitize(str(e))})
+            except Exception:
+                return
 
 
 class Server(ThreadingHTTPServer):
-    def __init__(self, addr, handler_cls, env, store):
+    def __init__(self, addr, handler_cls, env, store, log_path: Path):
         super().__init__(addr, handler_cls)
         self.env = env
         self.store = store
+        self.log_path = log_path
 
 
 def main() -> None:
+    import argparse
+
     here = Path(__file__).resolve().parent
     load_dotenv(here / ".env")
     env = os.environ.copy()
 
-    bind = sanitize(env.get("AGENT_API_BIND") or "0.0.0.0")
-    port = int(env.get("AGENT_API_PORT") or 8808)
-    store = JobStore(here / ".state" / "agent_api.json")
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("--bind", default=None)
+    parser.add_argument("--port", default=None)
+    args = parser.parse_args()
 
-    httpd = Server((bind, port), Handler, env, store)
+    bind = sanitize(args.bind) if args.bind is not None else sanitize(env.get("AGENT_API_BIND") or "0.0.0.0")
+    port = int(args.port) if args.port is not None else int(env.get("AGENT_API_PORT") or 8808)
+    store = JobStore(here / ".state" / "agent_api.json")
+    log_path = here / ".state" / "agent_api.log"
+
+    httpd = Server((bind, port), Handler, env, store, log_path)
     httpd.serve_forever()
 
 
