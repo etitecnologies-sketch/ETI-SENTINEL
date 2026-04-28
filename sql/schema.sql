@@ -32,12 +32,24 @@ CREATE TABLE IF NOT EXISTS users (
   username      TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role          TEXT NOT NULL DEFAULT 'client',
+  access_level  SMALLINT NOT NULL DEFAULT 1,
+  permissions   JSONB DEFAULT '{}'::jsonb,
   client_id     INT REFERENCES clients(id) ON DELETE CASCADE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'client';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_level SMALLINT NOT NULL DEFAULT 1;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS client_id INT REFERENCES clients(id) ON DELETE CASCADE;
+
+DO $$
+BEGIN
+  UPDATE users SET access_level = 3 WHERE role = 'superadmin' AND (access_level IS NULL OR access_level < 3);
+EXCEPTION
+  WHEN undefined_column THEN
+    NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS hosts (
   id         SERIAL PRIMARY KEY,
@@ -220,6 +232,34 @@ CREATE TABLE IF NOT EXISTS events (
   payload        JSONB DEFAULT '{}'::jsonb,
   is_read        BOOLEAN DEFAULT FALSE
 );
+
+DO $$
+DECLARE
+  payload_type TEXT;
+BEGIN
+  SELECT format_type(a.atttypid, a.atttypmod)
+    INTO payload_type
+  FROM pg_attribute a
+  JOIN pg_class c ON c.oid = a.attrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = current_schema()
+    AND c.relname = 'events'
+    AND a.attname = 'payload'
+    AND a.attnum > 0
+    AND NOT a.attisdropped;
+
+  IF payload_type IS NOT NULL AND payload_type <> 'jsonb' THEN
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS payload_jsonb JSONB DEFAULT '{}'::jsonb;
+    BEGIN
+      EXECUTE 'UPDATE events SET payload_jsonb = payload::jsonb WHERE payload IS NOT NULL AND payload <> ''''';
+    EXCEPTION
+      WHEN OTHERS THEN
+        EXECUTE 'UPDATE events SET payload_jsonb = jsonb_build_object(''raw'', payload) WHERE payload IS NOT NULL AND payload <> ''''';
+    END;
+    ALTER TABLE events DROP COLUMN payload;
+    ALTER TABLE events RENAME COLUMN payload_jsonb TO payload;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_events_time ON events (time DESC);
 

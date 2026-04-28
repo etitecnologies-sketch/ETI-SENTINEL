@@ -610,7 +610,8 @@ function AuthPage({ onLogin }) {
         setStep("login"); return;
       }
       const d = await api("/auth/login", { method: "POST", body: JSON.stringify(form) });
-      setToken(d.token); onLogin(d.role, d.client_id);
+      setToken(d.token);
+      onLogin(d.role, d.client_id, d.access_level);
     } catch (e) { setErr(e.error || "Erro"); }
     finally { setLoading(false); }
   };
@@ -800,7 +801,7 @@ function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [modal, setModal] = useState(null);
   const [userModal, setUserModal] = useState(null);
-  const [newUser, setNewUser] = useState({ username: "", password: "" });
+  const [newUser, setNewUser] = useState({ username: "", password: "", access_level: 1 });
   const [search, setSearch] = useState("");
   const [hoverId, setHoverId] = useState(null);
 
@@ -816,7 +817,7 @@ function ClientsPage() {
   const createUser = async () => {
     if (!newUser.username || !newUser.password) return;
     await api(`/clients/${userModal}/users`, { method: "POST", body: JSON.stringify(newUser) });
-    setUserModal(null); setNewUser({ username: "", password: "" });
+    setUserModal(null); setNewUser({ username: "", password: "", access_level: 1 });
   };
 
   const filtered = clients.filter((c) =>
@@ -901,6 +902,18 @@ function ClientsPage() {
             <div style={S.modalTitle}>👤 Criar Acesso do Cliente</div>
             <div style={S.fg}><label style={S.label}>Usuário</label><input style={S.input} value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} placeholder="cliente_abc" /></div>
             <div style={S.fg}><label style={S.label}>Senha</label><input style={S.input} type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} placeholder="••••••••" /></div>
+            <div style={S.fg}>
+              <label style={S.label}>Nível de acesso (RBAC)</label>
+              <select
+                style={S.select}
+                value={newUser.access_level}
+                onChange={(e) => setNewUser({ ...newUser, access_level: parseInt(e.target.value) || 1 })}
+              >
+                <option value={1}>Nível 1 — Métricas TI/Solar</option>
+                <option value={2}>Nível 2 — Vídeo ao vivo (ONVIF/RTSP)</option>
+                <option value={3}>Nível 3 — Gravações/Exportação (futuro)</option>
+              </select>
+            </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button style={S.btn("ghost")} onClick={() => setUserModal(null)}>Cancelar</button>
               <button style={S.btn("primary")} onClick={createUser}>Criar Acesso</button>
@@ -921,7 +934,7 @@ const EMPTY_DEVICE = {
   mac_address: "", serial_number: "",
 };
 
-function DeviceModal({ device, clients, userRole, userClientId, onSave, onClose }) {
+function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave, onClose }) {
   const [form, setForm] = useState(device 
     ? { ...EMPTY_DEVICE, ...device, tags: device.tags || [] } 
     : { ...EMPTY_DEVICE }
@@ -956,7 +969,7 @@ function DeviceModal({ device, clients, userRole, userClientId, onSave, onClose 
 
   useEffect(() => {
     let alive = true;
-    if (!device?.id) return;
+    if (!canVideo || !device?.id) return;
     api(`/devices/${device.id}/onvif`)
       .then((d) => {
         if (!alive) return;
@@ -979,7 +992,7 @@ function DeviceModal({ device, clients, userRole, userClientId, onSave, onClose 
 
   useEffect(() => {
     let alive = true;
-    if (!device?.id) return;
+    if (!canVideo || !device?.id) return;
     api(`/devices/${device.id}/rtsp`)
       .then((d) => {
         if (!alive) return;
@@ -1014,6 +1027,12 @@ function DeviceModal({ device, clients, userRole, userClientId, onSave, onClose 
       else saved = await api("/devices", { method: "POST", body: JSON.stringify(payload) });
 
       const id = device?.id || saved?.id;
+
+      if (!canVideo) {
+        onSave();
+        return;
+      }
+
       const wantsOnvif =
         !!onvif.enabled ||
         !!(onvif.host || "").trim() ||
@@ -1142,109 +1161,117 @@ function DeviceModal({ device, clients, userRole, userClientId, onSave, onClose 
         <div style={S.fg}><label style={S.label}>Notas</label><textarea style={{ ...S.input, minHeight: 50, resize: "vertical" }} value={form.notes} onChange={(e) => set("notes", e.target.value)} /></div>
 
         <div style={S.divider} />
-        <div style={S.sectionTitle}>ONVIF (Eventos & Vídeo)</div>
-        <div style={{ display: "flex", gap: 18, marginBottom: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#94a3b8", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={onvif.enabled}
-              onChange={(e) => setOnvifField("enabled", e.target.checked)}
-            />
-            Habilitar ONVIF
-          </label>
-        </div>
-
-        <div style={S.grid(2)}>
-          <div style={S.fg}>
-            <label style={S.label}>Host ONVIF</label>
-            <input style={S.input} value={onvif.host} onChange={(e) => setOnvifField("host", e.target.value)} placeholder="192.168.1.100" />
-          </div>
-          <div style={S.fg}>
-            <label style={S.label}>Porta ONVIF</label>
-            <input style={S.input} type="number" value={onvif.port} onChange={(e) => setOnvifField("port", e.target.value)} placeholder="80" />
-          </div>
-        </div>
-        <div style={S.grid(2)}>
-          <div style={S.fg}>
-            <label style={S.label}>Usuário ONVIF</label>
-            <input style={S.input} value={onvif.username} onChange={(e) => setOnvifField("username", e.target.value)} placeholder="admin" />
-          </div>
-          <div style={S.fg}>
-            <label style={S.label}>Senha ONVIF</label>
-            <input
-              style={S.input}
-              type="password"
-              value={onvif.password}
-              onChange={(e) => setOnvif((o) => ({ ...o, password: e.target.value, passwordTouched: true, passwordCleared: false }))}
-              placeholder={onvif.password_set ? "•••••• (já salva)" : "••••••"}
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
-              <button
-                type="button"
-                style={S.btnSm("ghost")}
-                onClick={() => setOnvif((o) => ({ ...o, password: "", passwordTouched: false, passwordCleared: true, password_set: false }))}
-              >
-                Limpar senha
-              </button>
+        {canVideo ? (
+          <>
+            <div style={S.sectionTitle}>ONVIF (Eventos & Vídeo)</div>
+            <div style={{ display: "flex", gap: 18, marginBottom: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#94a3b8", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={onvif.enabled}
+                  onChange={(e) => setOnvifField("enabled", e.target.checked)}
+                />
+                Habilitar ONVIF
+              </label>
             </div>
-          </div>
-        </div>
-        <div style={S.fg}>
-          <label style={S.label}>Channel Map (JSON)</label>
-          <textarea
-            style={{ ...S.input, minHeight: 80, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
-            value={onvif.channel_map_text}
-            onChange={(e) => setOnvifField("channel_map_text", e.target.value)}
-            placeholder='{"VideoSourceToken_1": 1}'
-          />
-        </div>
 
-        <div style={S.divider} />
-        <div style={S.sectionTitle}>RTSP (Perda/Travamento de Vídeo)</div>
-        <div style={{ display: "flex", gap: 18, marginBottom: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#94a3b8", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={rtsp.enabled}
-              onChange={(e) => setRtspField("enabled", e.target.checked)}
-            />
-            Habilitar RTSP Monitor
-          </label>
-        </div>
-        <div style={S.grid(2)}>
-          <div style={S.fg}>
-            <label style={S.label}>Usuário RTSP (opcional)</label>
-            <input style={S.input} value={rtsp.username} onChange={(e) => setRtspField("username", e.target.value)} placeholder="admin" />
-          </div>
-          <div style={S.fg}>
-            <label style={S.label}>Senha RTSP (opcional)</label>
-            <input
-              style={S.input}
-              type="password"
-              value={rtsp.password}
-              onChange={(e) => setRtsp((o) => ({ ...o, password: e.target.value, passwordTouched: true, passwordCleared: false }))}
-              placeholder={rtsp.password_set ? "•••••• (já salva)" : "••••••"}
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
-              <button
-                type="button"
-                style={S.btnSm("ghost")}
-                onClick={() => setRtsp((o) => ({ ...o, password: "", passwordTouched: false, passwordCleared: true, password_set: false }))}
-              >
-                Limpar senha
-              </button>
+            <div style={S.grid(2)}>
+              <div style={S.fg}>
+                <label style={S.label}>Host ONVIF</label>
+                <input style={S.input} value={onvif.host} onChange={(e) => setOnvifField("host", e.target.value)} placeholder="192.168.1.100" />
+              </div>
+              <div style={S.fg}>
+                <label style={S.label}>Porta ONVIF</label>
+                <input style={S.input} type="number" value={onvif.port} onChange={(e) => setOnvifField("port", e.target.value)} placeholder="80" />
+              </div>
             </div>
+            <div style={S.grid(2)}>
+              <div style={S.fg}>
+                <label style={S.label}>Usuário ONVIF</label>
+                <input style={S.input} value={onvif.username} onChange={(e) => setOnvifField("username", e.target.value)} placeholder="admin" />
+              </div>
+              <div style={S.fg}>
+                <label style={S.label}>Senha ONVIF</label>
+                <input
+                  style={S.input}
+                  type="password"
+                  value={onvif.password}
+                  onChange={(e) => setOnvif((o) => ({ ...o, password: e.target.value, passwordTouched: true, passwordCleared: false }))}
+                  placeholder={onvif.password_set ? "•••••• (já salva)" : "••••••"}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+                  <button
+                    type="button"
+                    style={S.btnSm("ghost")}
+                    onClick={() => setOnvif((o) => ({ ...o, password: "", passwordTouched: false, passwordCleared: true, password_set: false }))}
+                  >
+                    Limpar senha
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div style={S.fg}>
+              <label style={S.label}>Channel Map (JSON)</label>
+              <textarea
+                style={{ ...S.input, minHeight: 80, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
+                value={onvif.channel_map_text}
+                onChange={(e) => setOnvifField("channel_map_text", e.target.value)}
+                placeholder='{"VideoSourceToken_1": 1}'
+              />
+            </div>
+
+            <div style={S.divider} />
+            <div style={S.sectionTitle}>RTSP (Perda/Travamento de Vídeo)</div>
+            <div style={{ display: "flex", gap: 18, marginBottom: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#94a3b8", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={rtsp.enabled}
+                  onChange={(e) => setRtspField("enabled", e.target.checked)}
+                />
+                Habilitar RTSP Monitor
+              </label>
+            </div>
+            <div style={S.grid(2)}>
+              <div style={S.fg}>
+                <label style={S.label}>Usuário RTSP (opcional)</label>
+                <input style={S.input} value={rtsp.username} onChange={(e) => setRtspField("username", e.target.value)} placeholder="admin" />
+              </div>
+              <div style={S.fg}>
+                <label style={S.label}>Senha RTSP (opcional)</label>
+                <input
+                  style={S.input}
+                  type="password"
+                  value={rtsp.password}
+                  onChange={(e) => setRtsp((o) => ({ ...o, password: e.target.value, passwordTouched: true, passwordCleared: false }))}
+                  placeholder={rtsp.password_set ? "•••••• (já salva)" : "••••••"}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+                  <button
+                    type="button"
+                    style={S.btnSm("ghost")}
+                    onClick={() => setRtsp((o) => ({ ...o, password: "", passwordTouched: false, passwordCleared: true, password_set: false }))}
+                  >
+                    Limpar senha
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div style={S.fg}>
+              <label style={S.label}>Streams (JSON)</label>
+              <textarea
+                style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
+                value={rtsp.streams_text}
+                onChange={(e) => setRtspField("streams_text", e.target.value)}
+                placeholder='[{"channel":1,"name":"Canal 1","url":"rtsp://192.168.1.100:554/...","timeout_seconds":8,"interval_seconds":30,"transport":"tcp"}]'
+              />
+            </div>
+          </>
+        ) : (
+          <div style={{ background: "rgba(59,158,255,0.06)", border: "1px solid rgba(59,158,255,0.12)", borderRadius: 12, padding: 14, color: "#b8cfe8", fontSize: 12 }}>
+            Acesso restrito. Para configurar ONVIF/RTSP, o usuário precisa de nível 2 (vídeo ao vivo).
           </div>
-        </div>
-        <div style={S.fg}>
-          <label style={S.label}>Streams (JSON)</label>
-          <textarea
-            style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
-            value={rtsp.streams_text}
-            onChange={(e) => setRtspField("streams_text", e.target.value)}
-            placeholder='[{"channel":1,"name":"Canal 1","url":"rtsp://192.168.1.100:554/...","timeout_seconds":8,"interval_seconds":30,"transport":"tcp"}]'
-          />
-        </div>
+        )}
 
         {err && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 10 }}>⚠️ {err}</div>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -1257,7 +1284,7 @@ function DeviceModal({ device, clients, userRole, userClientId, onSave, onClose 
 }
 
 // ── Devices Page ──────────────────────────────────────────────
-function DevicesPage({ userRole, userClientId }) {
+function DevicesPage({ userRole, userClientId, canVideo }) {
   const [devices, setDevices] = useState([]);
   const [clients, setClients] = useState([]);
   const [modal, setModal] = useState(null);
@@ -1445,8 +1472,18 @@ function DevicesPage({ userRole, userClientId }) {
       </div>
 
       {(modal === "new" || (modal && modal.id)) && (
-        <DeviceModal device={modal === "new" ? null : modal} clients={clients} userRole={userRole} userClientId={userClientId}
-          onSave={() => { load(); setModal(null); }} onClose={() => setModal(null)} />
+        <DeviceModal
+          device={modal === "new" ? null : modal}
+          clients={clients}
+          userRole={userRole}
+          userClientId={userClientId}
+          canVideo={!!canVideo}
+          onSave={() => {
+            load();
+            setModal(null);
+          }}
+          onClose={() => setModal(null)}
+        />
       )}
       {tokenModal && (
         <div style={S.modal} onClick={() => setTokenModal(null)}>
@@ -2529,12 +2566,19 @@ function NexusApp() {
   const [authed, setAuthed] = useState(!!getToken());
   const [userRole, setUserRole] = useState("superadmin");
   const [userClientId, setUserClientId] = useState(null);
+  const [userAccessLevel, setUserAccessLevel] = useState(1);
   const [page, setPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (authed) {
-      api("/auth/me").then((u) => { setUserRole(u.role); setUserClientId(u.client_id); }).catch(() => {});
+      api("/auth/me")
+        .then((u) => {
+          setUserRole(u.role);
+          setUserClientId(u.client_id);
+          setUserAccessLevel(Number(u.access_level || (u.role === "superadmin" ? 3 : 1)));
+        })
+        .catch(() => {});
     }
   }, [authed]);
 
@@ -2542,9 +2586,22 @@ function NexusApp() {
     if (isMobile) setSidebarOpen(false);
   }, [page, isMobile]);
 
-  if (!authed) return <AuthPage onLogin={(role, cid) => { setUserRole(role); setUserClientId(cid); setAuthed(true); }} />;
+  if (!authed) {
+    return (
+      <AuthPage
+        onLogin={(role, cid, lvl) => {
+          setUserRole(role);
+          setUserClientId(cid);
+          setUserAccessLevel(Number(lvl || (role === "superadmin" ? 3 : 1)));
+          setAuthed(true);
+        }}
+      />
+    );
+  }
 
   const isSuperAdmin = userRole === "superadmin";
+  const canVideo = isSuperAdmin || userAccessLevel >= 2;
+  const canRecord = isSuperAdmin || userAccessLevel >= 3;
 
   const NAV_SUPERADMIN = [
     { section: "MENU PRINCIPAL" },
@@ -2563,6 +2620,7 @@ function NexusApp() {
     { id: "devices", label: "Devices", icon: Server },
     { id: "alerts", label: "Alertas", icon: Bell },
     { id: "events", label: "Eventos", icon: ClipboardList },
+    { id: "solar", label: "Solar", icon: Sun },
   ];
 
   const NAV = isSuperAdmin ? NAV_SUPERADMIN : NAV_CLIENT;
@@ -2570,7 +2628,7 @@ function NexusApp() {
   const PAGES = {
     dashboard: <Dashboard userRole={userRole} />,
     clients:   <ClientsPage />,
-    devices:   <DevicesPage userRole={userRole} userClientId={userClientId} />,
+    devices:   <DevicesPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
     triggers:  <TriggersPage userRole={userRole} />,
     alerts:    <AlertsPage userRole={userRole} />,
     events:    <EventsPage userRole={userRole} />,
@@ -2630,7 +2688,7 @@ function NexusApp() {
             <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#1a7fff,#004fa3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#fff', fontWeight: 800, flexShrink: 0 }}>S</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#3b9eff', letterSpacing: '0.04em' }}>{isSuperAdmin ? 'Superadmin' : 'Cliente'}</div>
-              <div style={{ fontSize: 9, color: '#2a5070', letterSpacing: '0.06em' }}>v1.0.3</div>
+              <div style={{ fontSize: 9, color: '#2a5070', letterSpacing: '0.06em' }}>v1.0.3 · nível {userAccessLevel}</div>
             </div>
             <PulsingDot color="#00c9a7" />
           </div>

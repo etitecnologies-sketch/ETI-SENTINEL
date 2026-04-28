@@ -258,7 +258,10 @@ async function initDB() {
       );
       CREATE TABLE IF NOT EXISTS users (
           id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-          role TEXT NOT NULL DEFAULT 'client', client_id INT REFERENCES clients(id) ON DELETE CASCADE,
+          role TEXT NOT NULL DEFAULT 'client',
+          access_level SMALLINT NOT NULL DEFAULT 1,
+          permissions JSONB DEFAULT '{}'::jsonb,
+          client_id INT REFERENCES clients(id) ON DELETE CASCADE,
           created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE TABLE IF NOT EXISTS hosts (
@@ -346,6 +349,8 @@ async function initDB() {
     }
 
     const migrations = [
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS access_level SMALLINT NOT NULL DEFAULT 1",
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '{}'::jsonb",
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS ddns_address TEXT DEFAULT ''",
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS monitor_port INT DEFAULT 0",
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''",
@@ -388,6 +393,8 @@ async function initDB() {
       "ALTER TABLE events ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'::jsonb"
     ];
     for (let m of migrations) { await pool.query(m).catch(() => {}); }
+
+    await pool.query("UPDATE users SET access_level=3 WHERE role='superadmin' AND (access_level IS NULL OR access_level < 3)").catch(() => {});
     
     // Inicia tabelas solares se não existirem
     await pool.query(`
@@ -516,6 +523,16 @@ function superadmin(req, res, next) {
   next();
 }
 
+function requireAccessLevel(minLevel) {
+  return (req, res, next) => {
+    const lvl = Number(req.user?.access_level ?? 1);
+    if (Number.isNaN(lvl) || lvl < minLevel) {
+      return res.status(403).json({ error: `Access level ${minLevel}+ required` });
+    }
+    next();
+  };
+}
+
 function clientFilter(req) {
   return req.user.role === "superadmin" ? (req.query.client_id ? parseInt(req.query.client_id) : null) : req.user.client_id;
 }
@@ -536,7 +553,7 @@ app.post("/auth/setup", async (req, res) => {
     const exists = await pool.query("SELECT id FROM users LIMIT 1");
     if (exists.rows.length > 0) return res.status(409).json({ error: "Setup already done" });
     const hash = await bcrypt.hash(password, 10);
-    await pool.query("INSERT INTO users (username, password_hash, role) VALUES ($1,$2,'superadmin')", [username, hash]);
+    await pool.query("INSERT INTO users (username, password_hash, role, access_level) VALUES ($1,$2,'superadmin',3)", [username, hash]);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: "Setup failed" });
@@ -551,8 +568,14 @@ app.post("/auth/login", loginLimiter, async (req, res) => {
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
-    const token = jwt.sign({ id: user.id, username, role: user.role, client_id: user.client_id }, JWT_SECRET, { expiresIn: "7d" });
-    res.json({ token, role: user.role, client_id: user.client_id });
+    const access_level = Number(user.access_level || (user.role === "superadmin" ? 3 : 1));
+    const permissions = user.permissions || {};
+    const token = jwt.sign(
+      { id: user.id, username, role: user.role, client_id: user.client_id, access_level, permissions },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+    res.json({ token, role: user.role, client_id: user.client_id, access_level, permissions });
   } catch (e) {
     res.status(500).json({ error: "Login failed" });
   }
@@ -645,7 +668,7 @@ app.delete("/devices/:id", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/devices/:id/onvif", auth, async (req, res) => {
+app.get("/devices/:id/onvif", auth, requireAccessLevel(2), async (req, res) => {
   const deviceId = parseInt(req.params.id);
   const access = await assertDeviceAccess(req, deviceId);
   if (!access.ok) return res.status(access.status).json({ error: access.error });
@@ -656,7 +679,7 @@ app.get("/devices/:id/onvif", auth, async (req, res) => {
   res.json(r.rows[0]);
 });
 
-app.put("/devices/:id/onvif", auth, async (req, res) => {
+app.put("/devices/:id/onvif", auth, requireAccessLevel(2), async (req, res) => {
   const deviceId = parseInt(req.params.id);
   const access = await assertDeviceAccess(req, deviceId);
   if (!access.ok) return res.status(access.status).json({ error: access.error });
@@ -700,7 +723,7 @@ app.put("/devices/:id/onvif", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/devices/:id/rtsp", auth, async (req, res) => {
+app.get("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
   const deviceId = parseInt(req.params.id);
   const access = await assertDeviceAccess(req, deviceId);
   if (!access.ok) return res.status(access.status).json({ error: access.error });
@@ -711,7 +734,7 @@ app.get("/devices/:id/rtsp", auth, async (req, res) => {
   res.json(r.rows[0]);
 });
 
-app.put("/devices/:id/rtsp", auth, async (req, res) => {
+app.put("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
   const deviceId = parseInt(req.params.id);
   const access = await assertDeviceAccess(req, deviceId);
   if (!access.ok) return res.status(access.status).json({ error: access.error });
@@ -1136,9 +1159,13 @@ app.delete("/clients/:id", auth, superadmin, async (req, res) => {
 });
 
 app.post("/clients/:id/users", auth, superadmin, async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, access_level } = req.body;
+  const lvl = Math.max(1, Math.min(3, parseInt(access_level || 1, 10) || 1));
   const hash = await bcrypt.hash(password, 10);
-  await pool.query("INSERT INTO users (username, password_hash, role, client_id) VALUES ($1,$2,'client',$3)", [username, hash, req.params.id]);
+  await pool.query(
+    "INSERT INTO users (username, password_hash, role, access_level, client_id) VALUES ($1,$2,'client',$3,$4)",
+    [username, hash, lvl, req.params.id]
+  );
   res.json({ ok: true });
 });
 
