@@ -254,6 +254,28 @@ def _post_discovery(ingest_api_url: str, collector_key: str, agent_id: str, clie
     requests.post(url, headers={"x-collector-key": collector_key}, json=body, timeout=20)
 
 
+def _infer_client_id(ingest_api_url: str, collector_key: str) -> Optional[int]:
+    try:
+        url = ingest_api_url.rstrip("/") + "/collector/devices"
+        r = requests.get(url, headers={"x-collector-key": collector_key}, timeout=10)
+        if r.status_code != 200:
+            return None
+        data = r.json() or []
+        counts: Dict[int, int] = {}
+        for d in data:
+            try:
+                cid = int(d.get("client_id") or 0)
+            except Exception:
+                continue
+            if cid > 0:
+                counts[cid] = counts.get(cid, 0) + 1
+        if not counts:
+            return None
+        return max(counts.items(), key=lambda x: x[1])[0]
+    except Exception:
+        return None
+
+
 def main() -> None:
     here = os.path.dirname(os.path.abspath(__file__))
     load_dotenv(os.path.join(here, ".env"))
@@ -273,13 +295,16 @@ def main() -> None:
     ports = [int(x) for x in ports_csv.split(",") if x.strip().isdigit()]
     enable_ws_discovery = _bool(os.getenv("DISCOVERY_ONVIF_WS") or "1")
     ws_timeout = int(os.getenv("DISCOVERY_WS_TIMEOUT_SECONDS") or 2)
-    require_ping = _bool(os.getenv("DISCOVERY_REQUIRE_PING") or "1")
+    require_ping = _bool(os.getenv("DISCOVERY_REQUIRE_PING") or "0")
     resolve_dns = _bool(os.getenv("DISCOVERY_RESOLVE_DNS") or "1")
     include_self = _bool(os.getenv("DISCOVERY_INCLUDE_SELF") or "0")
     my_ips = {a.address for addrs in psutil.net_if_addrs().values() for a in addrs if getattr(a, "family", None) == socket.AF_INET}
 
     if not collector_key:
         raise SystemExit("COLLECTOR_KEY obrigatório")
+
+    if client_id_int is None:
+        client_id_int = _infer_client_id(ingest_api_url, collector_key)
 
     while True:
         items: List[Dict[str, Any]] = []

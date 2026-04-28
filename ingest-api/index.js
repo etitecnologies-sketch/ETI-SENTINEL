@@ -516,6 +516,12 @@ const WA_INSTANCE_GLOBAL = sanitize(process.env.WA_INSTANCE || "");
 const WA_TOKEN_GLOBAL = sanitize(process.env.WA_TOKEN || "");
 const WA_NUMBER_GLOBAL = sanitize(process.env.WA_NUMBER || "");
 const COLLECTOR_KEY = sanitize(process.env.COLLECTOR_KEY || "");
+const AUTO_ADOPT_DISCOVERY = sanitize(process.env.AUTO_ADOPT_DISCOVERY || "1") !== "0";
+const DEFAULT_DISCOVERY_CLIENT_ID = (() => {
+  const v = sanitize(process.env.DEFAULT_DISCOVERY_CLIENT_ID || "");
+  const n = parseInt(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+})();
 const ONVIF_CRED_SECRET = process.env.ONVIF_CRED_SECRET || JWT_SECRET;
 const ONVIF_CRED_KEY = crypto.createHash("sha256").update(String(ONVIF_CRED_SECRET)).digest();
 
@@ -1009,13 +1015,14 @@ app.post("/collector/discovery", async (req, res) => {
 
   try {
     const agent_id = sanitize(req.body?.agent_id || "");
-    const client_id = req.body?.client_id ? parseInt(req.body.client_id) : null;
+    const client_id_raw = req.body?.client_id ? parseInt(req.body.client_id) : null;
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
 
     if (!agent_id) return res.status(400).json({ error: "agent_id required" });
     if (items.length === 0) return res.json({ ok: true, upserted: 0 });
 
     let upserted = 0;
+    let adopted = 0;
     for (const it of items) {
       const ip_address = sanitize(it?.ip_address || "");
       if (!ip_address) continue;
@@ -1030,7 +1037,8 @@ app.post("/collector/discovery", async (req, res) => {
         .filter((p) => Number.isFinite(p) && p > 0 && p <= 65535);
       const raw = it?.raw && typeof it.raw === "object" ? it.raw : {};
 
-      await pool.query(
+      const targetClientId = (Number.isFinite(client_id_raw) && client_id_raw > 0 ? client_id_raw : null) || DEFAULT_DISCOVERY_CLIENT_ID || null;
+      const up = await pool.query(
         `
         INSERT INTO discovered_devices (
           agent_id, client_id, ip_address, mac_address, hostname, vendor, guess_type,
@@ -1046,13 +1054,79 @@ app.post("/collector/discovery", async (req, res) => {
           onvif_xaddrs=CASE WHEN EXCLUDED.onvif_xaddrs <> '' THEN EXCLUDED.onvif_xaddrs ELSE discovered_devices.onvif_xaddrs END,
           raw=EXCLUDED.raw,
           last_seen=NOW()
+        RETURNING id, device_id, client_id
         `,
-        [agent_id, client_id, ip_address, mac_address, hostname, vendor, guess_type, open_ports, onvif_xaddrs, JSON.stringify(raw)]
+        [agent_id, targetClientId, ip_address, mac_address, hostname, vendor, guess_type, open_ports, onvif_xaddrs, JSON.stringify(raw)]
       );
       upserted += 1;
+
+      const dd = up.rows[0];
+      if (!AUTO_ADOPT_DISCOVERY) continue;
+      if (!dd || dd.device_id) continue;
+      if (!dd.client_id) continue;
+      const ports = new Set(open_ports || []);
+      const eligible =
+        !!onvif_xaddrs ||
+        ports.has(554) ||
+        ports.has(80) ||
+        ports.has(443) ||
+        ports.has(22) ||
+        ports.has(161) ||
+        ports.has(9100) ||
+        ports.has(3389);
+      if (!eligible) continue;
+
+      const existing = await pool.query("SELECT id FROM devices WHERE client_id=$1 AND ip_address=$2 LIMIT 1", [dd.client_id, ip_address]);
+      if (existing.rows.length > 0) {
+        await pool.query("UPDATE discovered_devices SET device_id=$1 WHERE id=$2", [existing.rows[0].id, dd.id]);
+        adopted += 1;
+        continue;
+      }
+
+      const device_type =
+        (guess_type && guess_type !== "other" ? guess_type : "") ||
+        (ports.has(554) || onvif_xaddrs ? "camera" : ports.has(9100) ? "printer" : ports.has(3389) ? "windows" : ports.has(22) ? "server" : ports.has(161) ? "snmp" : "other");
+      const monitor_port = ports.has(80) ? 80 : ports.has(443) ? 443 : ports.has(554) ? 554 : ports.has(22) ? 22 : 0;
+      const name = hostname || `${device_type}-${ip_address.replace(/\./g, "-")}`;
+      const token = crypto.randomBytes(32).toString("hex");
+
+      const ins = await pool.query(
+        `
+        INSERT INTO devices (
+          name, description, location, token, device_type, ip_address, tags,
+          ddns_address, monitor_port, monitor_ping, monitor_agent, notes, client_id,
+          snmp_community, snmp_version, ssh_user, ssh_port,
+          mac_address, serial_number
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        RETURNING id
+        `,
+        [
+          name,
+          "Descoberto automaticamente pelo agente local",
+          "",
+          token,
+          device_type,
+          ip_address,
+          [device_type, "discovered", onvif_xaddrs ? "onvif" : ""].filter(Boolean),
+          "",
+          monitor_port,
+          true,
+          true,
+          onvif_xaddrs || "",
+          dd.client_id,
+          "public",
+          "2c",
+          "",
+          22,
+          mac_address,
+          "",
+        ]
+      );
+      await pool.query("UPDATE discovered_devices SET device_id=$1 WHERE id=$2", [ins.rows[0].id, dd.id]);
+      adopted += 1;
     }
 
-    res.json({ ok: true, upserted });
+    res.json({ ok: true, upserted, adopted });
   } catch (e) {
     console.error("/collector/discovery error:", e.message);
     res.status(500).json({ error: "Failed to save discovery", detail: e.message });
@@ -1110,7 +1184,7 @@ app.post("/discovered-devices/:id/adopt", auth, async (req, res) => {
     const open_ports = Array.isArray(dd.open_ports) ? dd.open_ports : [];
     const guess = sanitize(dd.guess_type || "");
     const device_type = guess || (open_ports.includes(554) ? "camera" : "other");
-    const monitor_port = open_ports.includes(80) ? 80 : open_ports.includes(443) ? 443 : 0;
+    const monitor_port = open_ports.includes(80) ? 80 : open_ports.includes(443) ? 443 : open_ports.includes(554) ? 554 : open_ports.includes(22) ? 22 : 0;
     const token = crypto.randomBytes(32).toString("hex");
 
     const ins = await pool.query(
