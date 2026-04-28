@@ -14,6 +14,13 @@ def _which(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
+def _is_root_linux() -> bool:
+    try:
+        return hasattr(os, "geteuid") and os.geteuid() == 0
+    except Exception:
+        return False
+
+
 def _read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8")
 
@@ -75,6 +82,72 @@ def _pip_install(edge_dir: Path) -> None:
     py = _venv_python(edge_dir)
     _run([str(py), "-m", "pip", "install", "--upgrade", "pip"])
     _run([str(py), "-m", "pip", "install", "-r", str(edge_dir / "requirements.txt")])
+
+
+def _ensure_ffmpeg_windows() -> bool:
+    if _which("ffmpeg"):
+        return True
+    if not _which("winget"):
+        return False
+    r = _run(
+        [
+            "winget",
+            "install",
+            "--id",
+            "Gyan.FFmpeg",
+            "-e",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+        ],
+        check=False,
+    )
+    if r.returncode != 0:
+        return False
+    return _which("ffmpeg")
+
+
+def _ensure_ffmpeg_linux() -> bool:
+    if _which("ffmpeg"):
+        return True
+
+    def run_pkg(cmd: list) -> int:
+        return _run(cmd, check=False).returncode
+
+    use_sudo = (not _is_root_linux()) and _which("sudo")
+    prefix = ["sudo"] if use_sudo else []
+
+    if _which("apt-get"):
+        run_pkg(prefix + ["apt-get", "update"])
+        rc = run_pkg(prefix + ["apt-get", "install", "-y", "ffmpeg"])
+        if rc == 0:
+            return _which("ffmpeg")
+        return False
+
+    if _which("dnf"):
+        rc = run_pkg(prefix + ["dnf", "install", "-y", "ffmpeg"])
+        if rc == 0:
+            return _which("ffmpeg")
+        return False
+
+    if _which("yum"):
+        rc = run_pkg(prefix + ["yum", "install", "-y", "ffmpeg"])
+        if rc == 0:
+            return _which("ffmpeg")
+        return False
+
+    if _which("pacman"):
+        rc = run_pkg(prefix + ["pacman", "-Sy", "--noconfirm", "ffmpeg"])
+        if rc == 0:
+            return _which("ffmpeg")
+        return False
+
+    return False
+
+
+def _ensure_ffmpeg() -> bool:
+    if os.name == "nt":
+        return _ensure_ffmpeg_windows()
+    return _ensure_ffmpeg_linux()
 
 
 def _ensure_env(edge_dir: Path) -> Path:
@@ -156,6 +229,18 @@ def main() -> None:
 
     _ensure_venv(edge_dir)
     _pip_install(edge_dir)
+
+    print("Verificando dependências nativas (ffmpeg)...")
+    ffmpeg_ok = _ensure_ffmpeg()
+    if ffmpeg_ok:
+        print("✓ ffmpeg OK")
+    else:
+        print("⚠ ffmpeg não instalado automaticamente.")
+        if os.name == "nt":
+            print("  Instale manualmente e reabra o terminal:")
+            print("  winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements")
+        else:
+            print("  Instale manualmente (ex.: apt-get install -y ffmpeg) e reexecute o diagnóstico.")
 
     env_path = _ensure_env(edge_dir)
     _configure_env(env_path)
