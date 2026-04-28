@@ -23,7 +23,7 @@ except Exception:
 
 def _sanitize(s: Any) -> str:
     v = str(s or "").strip()
-    v = v.replace("`", "").replace('"', "").replace("'", "").strip()
+    v = v.replace("`", "").replace("´", "").replace('"', "").replace("'", "").strip()
     return v
 
 
@@ -175,12 +175,13 @@ def _stream_uri_template(media: Any, profile_token: str) -> str:
 
 
 def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: float) -> Dict[str, Any]:
-    parsed = urlparse(_sanitize(xaddr))
+    xaddr_s = _sanitize(xaddr)
+    parsed = urlparse(xaddr_s)
     host = parsed.hostname or ""
     port = parsed.port or 80
 
     out: Dict[str, Any] = {
-        "xaddr": _sanitize(xaddr),
+        "xaddr": xaddr_s,
         "ip": host,
         "port": port,
         "status": "error",
@@ -197,7 +198,7 @@ def fetch_onvif_camera_details(xaddr: str, user: str, password: str, timeout: fl
         return out
 
     try:
-        cam = ONVIFCamera(host, port, _sanitize(user), _sanitize(password), wsdl_dir=None, no_cache=True)
+        cam = ONVIFCamera(host, port, _sanitize(user), _sanitize(password))
         try:
             cam.devicemgmt.service_client.settings.strict = False
         except Exception:
@@ -278,4 +279,3 @@ def discover_cameras(timeout: float = 6.0, user: str = "admin", password: str = 
         seen.add(k)
         out.append(r)
     return out
-
