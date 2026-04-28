@@ -824,7 +824,7 @@ app.get("/collector/onvif-config", async (req, res) => {
     );
   } catch (e) {
     console.error("/collector/onvif-config error:", e.message);
-    res.status(500).json({ error: "Failed to fetch onvif config" });
+    res.status(500).json({ error: "Failed to fetch onvif config", detail: e.message });
   }
 });
 
@@ -867,7 +867,7 @@ app.get("/collector/rtsp-config", async (req, res) => {
     );
   } catch (e) {
     console.error("/collector/rtsp-config error:", e.message);
-    res.status(500).json({ error: "Failed to fetch rtsp config" });
+    res.status(500).json({ error: "Failed to fetch rtsp config", detail: e.message });
   }
 });
 
