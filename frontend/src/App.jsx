@@ -231,10 +231,17 @@ async function api(path, opts = {}) {
       return;
     }
 
-    const data = await res.json();
+    const raw = await res.text();
+    let data;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = { error: raw || `HTTP ${res.status}` };
+    }
+
     if (!res.ok) {
       console.error(`API Error [${res.status}] ${path}:`, data);
-      throw data;
+      throw data || { error: `HTTP ${res.status}` };
     }
     return data;
   } catch (err) {
@@ -1076,7 +1083,7 @@ function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave
         await api(`/devices/${id}/rtsp`, { method: "PUT", body: JSON.stringify(body) });
       }
       onSave();
-    } catch (e) { setErr(e.error || "Erro ao salvar dados"); }
+    } catch (e) { setErr(e?.error || e?.detail || e?.message || "Erro ao salvar dados"); }
     finally { setLoading(false); }
   };
 
