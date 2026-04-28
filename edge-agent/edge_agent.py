@@ -66,6 +66,7 @@ def run_check(here: Path, env: dict) -> int:
     ingest_api_url = _sanitize_base_url(env.get("INGEST_API_URL") or "")
     collector_key = _sanitize(env.get("COLLECTOR_KEY") or "")
     client_id = _sanitize(env.get("CLIENT_ID") or "")
+    agent_api_port = int(_sanitize(env.get("AGENT_API_PORT") or "8808") or 8808)
 
     print("ETI SENTINEL Edge Agent - Diagnóstico")
     print(f"OS: {platform.system()} ({os.name})")
@@ -96,6 +97,16 @@ def run_check(here: Path, env: dict) -> int:
             return r.status_code, _short_body(r.text)
         except Exception as e:
             return 0, _short_body(str(e))
+
+    code, body = (0, "")
+    try:
+        r = requests.get(f"http://127.0.0.1:{agent_api_port}/health", timeout=2)
+        code = r.status_code
+        body = _short_body(r.text)
+    except Exception as e:
+        code = 0
+        body = _short_body(str(e))
+    print(f"GET local /health -> {code} | {body}")
 
     code, body = get("/ready")
     print(f"GET /ready -> {code} | {body}")
