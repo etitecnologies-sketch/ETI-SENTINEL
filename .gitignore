@@ -61,3 +61,6 @@ go.sum
 .venv/
 venv/
 
+# Edge Agent runtime state
+edge-agent/.state/
+
