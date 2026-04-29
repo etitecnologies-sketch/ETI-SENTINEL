@@ -316,6 +316,15 @@ async function initDB() {
           client_id INT REFERENCES clients(id) ON DELETE CASCADE,
           created_at TIMESTAMPTZ DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS automation_rules (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          enabled BOOLEAN DEFAULT TRUE,
+          client_id INT REFERENCES clients(id) ON DELETE CASCADE,
+          rule JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
       CREATE TABLE IF NOT EXISTS alerts (
           id BIGSERIAL PRIMARY KEY, trigger_id INT REFERENCES triggers(id) ON DELETE CASCADE,
           device_id INT REFERENCES devices(id) ON DELETE SET NULL,
@@ -376,6 +385,8 @@ async function initDB() {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_discovered_devices_agent_ip ON discovered_devices (agent_id, ip_address);
       CREATE INDEX IF NOT EXISTS idx_discovered_devices_client ON discovered_devices (client_id);
       CREATE INDEX IF NOT EXISTS idx_discovered_devices_last_seen ON discovered_devices (last_seen DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_rules_client ON automation_rules (client_id);
+      CREATE INDEX IF NOT EXISTS idx_automation_rules_enabled ON automation_rules (enabled);
     `);
     
     // Default triggers if none exist
@@ -519,7 +530,7 @@ const TWILIO_ACCOUNT_SID_GLOBAL = sanitize(process.env.TWILIO_ACCOUNT_SID || "")
 const TWILIO_AUTH_TOKEN_GLOBAL = sanitize(process.env.TWILIO_AUTH_TOKEN || "") || WA_TOKEN_GLOBAL;
 const TWILIO_WHATSAPP_NUMBER_GLOBAL = sanitize(process.env.TWILIO_WHATSAPP_NUMBER || "");
 const TWILIO_CONTENT_SID_GLOBAL = sanitize(process.env.TWILIO_CONTENT_SID || "");
-const INSTANT_ANALYTICS_ALERTS = sanitize(process.env.INSTANT_ANALYTICS_ALERTS || "1") === "1";
+const INSTANT_ANALYTICS_ALERTS = sanitize(process.env.INSTANT_ANALYTICS_ALERTS || "0") === "1";
 const INSTANT_ANALYTICS_LOG = sanitize(process.env.INSTANT_ANALYTICS_LOG || "0") === "1";
 const COLLECTOR_KEY = sanitize(process.env.COLLECTOR_KEY || "");
 const AUTO_ADOPT_DISCOVERY = sanitize(process.env.AUTO_ADOPT_DISCOVERY || "0") === "1";
@@ -1189,6 +1200,80 @@ app.get("/collector/notify-config", async (req, res) => {
   } catch (e) {
     console.error("/collector/notify-config error:", e.message);
     res.status(500).json({ error: "Failed to fetch notify config", detail: e.message });
+  }
+});
+
+app.get("/collector/client-notify", async (req, res) => {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
+  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
+    if (!cid) return res.status(400).json({ error: "client_id required" });
+
+    const r = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        telegram_token,
+        telegram_chat_id,
+        wa_instance,
+        wa_token,
+        wa_number
+      FROM clients
+      WHERE id=$1
+      LIMIT 1
+      `,
+      [cid]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: "not_found" });
+    const row = r.rows[0];
+    res.json({
+      client_id: row.id,
+      name: row.name,
+      telegram_token: row.telegram_token || "",
+      telegram_chat_id: row.telegram_chat_id || "",
+      wa_instance: row.wa_instance || "",
+      wa_token: row.wa_token || "",
+      wa_number: row.wa_number || "",
+    });
+  } catch (e) {
+    console.error("/collector/client-notify error:", e.message);
+    res.status(500).json({ error: "Failed to fetch client notify", detail: e.message });
+  }
+});
+
+app.get("/collector/automation-rules", async (req, res) => {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
+  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
+    if (!cid) return res.status(400).json({ error: "client_id required" });
+    const r = await pool.query(
+      `
+      SELECT id, name, enabled, rule, updated_at
+      FROM automation_rules
+      WHERE client_id=$1 AND enabled=TRUE
+      ORDER BY id ASC
+      `,
+      [cid]
+    );
+    res.json(
+      r.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        enabled: row.enabled === true,
+        rule: row.rule || {},
+        updated_at: row.updated_at,
+      }))
+    );
+  } catch (e) {
+    console.error("/collector/automation-rules error:", e.message);
+    res.status(500).json({ error: "Failed to fetch rules", detail: e.message });
   }
 });
 

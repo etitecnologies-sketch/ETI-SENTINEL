@@ -104,7 +104,8 @@ def _normalize_event(topic: str, src: Dict[str, Any], data: Dict[str, Any]) -> T
 
 
 def _post_push(ingest_api_url: str, token: str, event_type: str, channel: int, description: str, severity: str) -> None:
-    url = ingest_api_url.rstrip("/") + "/push"
+    edge_push = _sanitize(os.getenv("EDGE_PUSH_URL") or "")
+    url = edge_push or (ingest_api_url.rstrip("/") + "/push")
     payload: Dict[str, Any] = {
         "token": token,
         "event_type": event_type,

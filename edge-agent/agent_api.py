@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 
 from camera_collector import _sanitize as sanitize
 from camera_collector import discover_cameras
+from edge_notify import send_telegram, send_whatsapp_twilio
+from edge_rules import RuleEngine, build_message
 
 
 def _sanitize_base_url(url: str) -> str:
@@ -39,6 +41,281 @@ def _append_log(path: Path, msg: str) -> None:
             path.write_text(f"[{ts}] {msg}\n", encoding="utf-8")
         except Exception:
             pass
+
+
+def _parse_query(path: str) -> Dict[str, str]:
+    try:
+        if "?" not in (path or ""):
+            return {}
+        qs = (path or "").split("?", 1)[1]
+        out: Dict[str, str] = {}
+        for part in qs.split("&"):
+            if not part:
+                continue
+            if "=" not in part:
+                out[sanitize(part)] = ""
+                continue
+            k, v = part.split("=", 1)
+            out[sanitize(k)] = sanitize(v)
+        return out
+    except Exception:
+        return {}
+
+
+class PushRelay:
+    def __init__(self, here: Path, env: Dict[str, str], log_path: Path):
+        self.here = here
+        self.env = env
+        self.log_path = log_path
+        self._lock = threading.Lock()
+        self._client_notify: Dict[str, str] = {}
+        self._rules: list = []
+        self._last_cfg_ts = 0.0
+        self._last_rules_ts = 0.0
+        self._last_push_ok = 0.0
+        self._queue_path = here / ".state" / "push_queue.jsonl"
+        self._engine = RuleEngine()
+        self._stop = False
+        self._sess = requests.Session()
+
+    def start(self) -> None:
+        threading.Thread(target=self._loop_refresh, daemon=True).start()
+        threading.Thread(target=self._loop_flush, daemon=True).start()
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def status(self) -> Dict[str, Any]:
+        with self._lock:
+            q = self._queue_size()
+            return {
+                "client_id": sanitize(self.env.get("CLIENT_ID") or ""),
+                "last_client_notify_fetch": self._last_cfg_ts,
+                "last_rules_fetch": self._last_rules_ts,
+                "last_push_ok": self._last_push_ok,
+                "queue_size": q,
+                "rules_count": len(self._rules or []),
+            }
+
+    def rules_summary(self) -> Any:
+        with self._lock:
+            return [{"id": r.get("id"), "name": r.get("name"), "enabled": r.get("enabled")} for r in (self._rules or [])]
+
+    def handle_event(self, payload: Dict[str, Any], source: str) -> Dict[str, Any]:
+        ev = {
+            "event_type": sanitize(payload.get("event_type") or ""),
+            "channel": int(payload.get("channel") or 0) if str(payload.get("channel") or "").isdigit() else 0,
+            "severity": sanitize(payload.get("severity") or "info"),
+            "description": sanitize(payload.get("description") or ""),
+            "device_id": int(payload.get("device_id") or 0) if str(payload.get("device_id") or "").isdigit() else None,
+            "source": sanitize(source or payload.get("source") or "edge"),
+        }
+        self._engine.push_event(ev)
+
+        with self._lock:
+            rules = list(self._rules or [])
+            cfg = dict(self._client_notify or {})
+
+        fired = self._engine.eval(rules)
+        fired_count = 0
+        if fired:
+            for rule_row, matched in fired:
+                rule = rule_row.get("rule") or {}
+                actions = rule.get("actions") or []
+                msg = build_message(rule_row, matched)
+                for a in actions:
+                    if not isinstance(a, dict):
+                        continue
+                    if sanitize(a.get("type") or "") != "notify":
+                        continue
+                    chans = a.get("channels") or ["telegram", "whatsapp"]
+                    if not isinstance(chans, list):
+                        chans = [str(chans)]
+                    if "telegram" in chans:
+                        send_telegram(msg, cfg.get("telegram_token") or "", cfg.get("telegram_chat_id") or "", log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"))
+                    if "whatsapp" in chans:
+                        send_whatsapp_twilio(
+                            msg,
+                            cfg.get("wa_instance") or "",
+                            cfg.get("wa_token") or "",
+                            cfg.get("wa_number") or "",
+                            from_number=sanitize(self.env.get("TWILIO_WHATSAPP_NUMBER") or ""),
+                            content_sid=sanitize(self.env.get("TWILIO_CONTENT_SID") or ""),
+                            log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"),
+                        )
+                fired_count += 1
+
+        forwarded = self._forward_push(payload, source)
+        return {"ok": True, "forwarded": forwarded, "rules_fired": fired_count}
+
+    def _ingest_url(self) -> str:
+        return _sanitize_base_url(self.env.get("INGEST_API_URL") or "")
+
+    def _collector_key(self) -> str:
+        return sanitize(self.env.get("COLLECTOR_KEY") or "")
+
+    def _client_id(self) -> Optional[int]:
+        cid = sanitize(self.env.get("CLIENT_ID") or "")
+        return int(cid) if cid.isdigit() else None
+
+    def _loop_refresh(self) -> None:
+        while not self._stop:
+            try:
+                self._refresh_client_notify()
+                self._refresh_rules()
+            except Exception:
+                pass
+            time.sleep(max(3, int(self.env.get("EDGE_REFRESH_SECONDS") or 10)))
+
+    def _refresh_client_notify(self) -> None:
+        url = self._ingest_url()
+        key = self._collector_key()
+        cid = self._client_id()
+        if not url or not key or not cid:
+            return
+        try:
+            r = self._sess.get(
+                url + "/collector/client-notify",
+                headers={"x-collector-key": key},
+                params={"client_id": cid},
+                timeout=(5, 18),
+            )
+            if r.status_code != 200:
+                return
+            data = r.json() or {}
+            with self._lock:
+                self._client_notify = {
+                    "telegram_token": sanitize(data.get("telegram_token") or ""),
+                    "telegram_chat_id": sanitize(data.get("telegram_chat_id") or ""),
+                    "wa_instance": sanitize(data.get("wa_instance") or ""),
+                    "wa_token": sanitize(data.get("wa_token") or ""),
+                    "wa_number": sanitize(data.get("wa_number") or ""),
+                }
+                self._last_cfg_ts = time.time()
+        except Exception:
+            return
+
+    def _refresh_rules(self) -> None:
+        url = self._ingest_url()
+        key = self._collector_key()
+        cid = self._client_id()
+        if not url or not key or not cid:
+            return
+        try:
+            r = self._sess.get(
+                url + "/collector/automation-rules",
+                headers={"x-collector-key": key},
+                params={"client_id": cid},
+                timeout=(5, 18),
+            )
+            if r.status_code != 200:
+                return
+            data = r.json() or []
+            if not isinstance(data, list):
+                return
+            with self._lock:
+                self._rules = data
+                self._last_rules_ts = time.time()
+        except Exception:
+            return
+
+    def _queue_size(self) -> int:
+        try:
+            if not self._queue_path.exists():
+                return 0
+            return len([1 for _ in self._queue_path.read_text(encoding="utf-8").splitlines() if _.strip()])
+        except Exception:
+            return 0
+
+    def _enqueue(self, payload: Dict[str, Any], source: str) -> None:
+        try:
+            self._queue_path.parent.mkdir(parents=True, exist_ok=True)
+            item = {"ts": time.time(), "payload": payload, "source": sanitize(source)}
+            with self._queue_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    def _read_queue(self) -> Any:
+        try:
+            if not self._queue_path.exists():
+                return []
+            lines = [ln for ln in self._queue_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            out = []
+            for ln in lines:
+                try:
+                    out.append(json.loads(ln))
+                except Exception:
+                    continue
+            return out
+        except Exception:
+            return []
+
+    def _write_queue(self, items: Any) -> None:
+        try:
+            self._queue_path.parent.mkdir(parents=True, exist_ok=True)
+            txt = "".join(json.dumps(it, ensure_ascii=False) + "\n" for it in (items or []) if it)
+            self._queue_path.write_text(txt, encoding="utf-8")
+        except Exception:
+            pass
+
+    def _forward_push(self, payload: Dict[str, Any], source: str) -> bool:
+        url = self._ingest_url()
+        if not url:
+            return False
+        try:
+            r = self._sess.post(
+                url + "/push",
+                json=payload,
+                headers={"x-event-source": sanitize(source or "edge")},
+                timeout=(5, 12),
+            )
+            ok = r.status_code == 200
+            if ok:
+                with self._lock:
+                    self._last_push_ok = time.time()
+            return ok
+        except Exception:
+            self._enqueue(payload, source)
+            return False
+
+    def _loop_flush(self) -> None:
+        while not self._stop:
+            try:
+                self._flush_once()
+            except Exception:
+                pass
+            time.sleep(max(2, int(self.env.get("EDGE_FLUSH_SECONDS") or 5)))
+
+    def _flush_once(self) -> None:
+        items = self._read_queue()
+        if not items:
+            return
+        url = self._ingest_url()
+        if not url:
+            return
+        keep = []
+        for it in items:
+            payload = it.get("payload") if isinstance(it, dict) else None
+            src = it.get("source") if isinstance(it, dict) else ""
+            if not isinstance(payload, dict):
+                continue
+            try:
+                r = self._sess.post(
+                    url + "/push",
+                    json=payload,
+                    headers={"x-event-source": sanitize(src or "edge")},
+                    timeout=(5, 12),
+                )
+                if r.status_code == 200:
+                    with self._lock:
+                        self._last_push_ok = time.time()
+                    continue
+            except Exception:
+                pass
+            keep.append(it)
+        if len(keep) != len(items):
+            self._write_queue(keep)
 
 
 class JobStore:
@@ -276,8 +553,59 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         try:
             path = (self.path or "").split("?")[0]
+            q = _parse_query(self.path or "")
             if path == "/health":
                 return self._json(200, {"ok": True})
+            if path == "/api/status":
+                return self._json(200, {"ok": True, "relay": self.server.relay.status()})
+            if path == "/api/rules":
+                return self._json(200, {"ok": True, "rules": self.server.relay.rules_summary()})
+            if path == "/api/recordings/list":
+                base_dir = Path(sanitize(self.server.env.get("RECORD_BASE_DIR") or str(Path(__file__).resolve().parent / ".recordings"))).resolve()
+                device_id = sanitize(q.get("device_id") or "")
+                channel = sanitize(q.get("channel") or "")
+                if not device_id.isdigit() or not channel.isdigit():
+                    return self._json(400, {"error": "device_id_and_channel_required"})
+                ddir = (base_dir / f"device_{int(device_id)}" / f"ch_{int(channel)}").resolve()
+                if not str(ddir).startswith(str(base_dir)):
+                    return self._json(400, {"error": "invalid_path"})
+                if not ddir.exists():
+                    return self._json(200, {"ok": True, "files": []})
+                out = []
+                for p in sorted(ddir.rglob("*.mp4"), reverse=True):
+                    try:
+                        rel = str(p.relative_to(ddir)).replace("\\", "/")
+                        out.append({"rel": rel, "size": p.stat().st_size, "mtime": int(p.stat().st_mtime)})
+                        if len(out) >= 200:
+                            break
+                    except Exception:
+                        continue
+                return self._json(200, {"ok": True, "base": str(ddir), "files": out})
+            if path == "/api/recordings/get":
+                base_dir = Path(sanitize(self.server.env.get("RECORD_BASE_DIR") or str(Path(__file__).resolve().parent / ".recordings"))).resolve()
+                device_id = sanitize(q.get("device_id") or "")
+                channel = sanitize(q.get("channel") or "")
+                rel = sanitize(q.get("rel") or "").replace("\\", "/")
+                if not device_id.isdigit() or not channel.isdigit() or not rel:
+                    return self._json(400, {"error": "device_id_channel_rel_required"})
+                if ".." in rel or rel.startswith("/"):
+                    return self._json(400, {"error": "invalid_rel"})
+                ddir = (base_dir / f"device_{int(device_id)}" / f"ch_{int(channel)}").resolve()
+                fp = (ddir / rel).resolve()
+                if not str(fp).startswith(str(ddir)) or not str(ddir).startswith(str(base_dir)):
+                    return self._json(400, {"error": "invalid_path"})
+                if not fp.exists() or not fp.is_file():
+                    return self._json(404, {"error": "not_found"})
+                try:
+                    data = fp.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "video/mp4")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                except Exception:
+                    return self._json(500, {"error": "read_failed"})
             if path == "/api/discover/cameras":
                 job = self.server.store.latest()
                 if not job:
@@ -314,6 +642,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             path = (self.path or "").split("?")[0]
+            if path == "/api/push":
+                body = self._read_json()
+                source = sanitize(self.headers.get("x-event-source") or body.get("source") or "edge")
+                if not isinstance(body, dict) or not sanitize(body.get("token") or ""):
+                    return self._json(400, {"error": "token_required"})
+                res = self.server.relay.handle_event(body, source)
+                return self._json(200, res)
             if path == "/api/discover/cameras/scan":
                 body = self._read_json()
                 user = sanitize(body.get("user") or os.getenv("CAMERA_DEFAULT_USER") or "admin")
@@ -347,6 +682,7 @@ class Server(ThreadingHTTPServer):
         self.env = env
         self.store = store
         self.log_path = log_path
+        self.relay = PushRelay(Path(__file__).resolve().parent, env, log_path)
 
 
 def main() -> None:
@@ -367,6 +703,7 @@ def main() -> None:
     log_path = here / ".state" / "agent_api.log"
 
     httpd = Server((bind, port), Handler, env, store, log_path)
+    httpd.relay.start()
     httpd.serve_forever()
 
 

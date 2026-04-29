@@ -221,10 +221,16 @@ def main() -> None:
     enable_onvif = _bool(env.get("ENABLE_ONVIF_COLLECTOR", "1"))
     enable_discovery = _bool(env.get("ENABLE_DISCOVERY", "1"))
     enable_api = _bool(env.get("ENABLE_AGENT_API", "1"))
+    enable_tray = _bool(env.get("ENABLE_TRAY", "0"))
+    enable_recording = _bool(env.get("ENABLE_RECORDING", "0"))
 
     _cleanup_orphans(here, env)
 
     specs = []
+    agent_api_port = int(_sanitize(env.get("AGENT_API_PORT") or "8808") or 8808)
+    env.setdefault("EDGE_PUSH_URL", f"http://127.0.0.1:{agent_api_port}/api/push")
+    if enable_api:
+        specs.append([python, str(here / "agent_api.py")])
     if enable_device:
         specs.append([python, str(here / "device_monitor.py")])
     if enable_rtsp:
@@ -234,8 +240,10 @@ def main() -> None:
         specs.append([python, str(repo_root / "onvif-collector" / "onvif_collector.py")])
     if enable_discovery:
         specs.append([python, str(here / "discovery_agent.py")])
-    if enable_api:
-        specs.append([python, str(here / "agent_api.py")])
+    if enable_recording:
+        specs.append([python, str(here / "recording_engine.py")])
+    if enable_tray:
+        specs.append([python, str(here / "tray_app.py")])
 
     if not specs:
         raise SystemExit("Nenhum módulo habilitado")
