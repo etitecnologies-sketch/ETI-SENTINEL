@@ -536,6 +536,7 @@ def fire_alert(cur,conn,trigger_id,name,host,expr,value,threshold,device_id=None
          f"Descrição: {escape_html(cl_name or 'ETI SENTINEL')}\n"
          f"Indicação: {esev_label} — verifique o dispositivo.")
     send_telegram(msg, tg_tok, tg_cid)
+    send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
     send_email(f"[{APP_NAME}] {sev_icon} {sev_label}: {name} em {host}",
         f"ALERTA {sev_label}\n\nTrigger: {name}\nHost: {host}\nDevice: {dname or 'N/A'}\nMAC: {mac}\nSN: {sn}\nCliente: {cl_name or 'N/A'}\nMétrica: {meta['label']} = {value:.1f}{unit}\nLimite: {threshold}{unit}\nHorário: {now_str()}", cl_email)
 
@@ -658,8 +659,7 @@ def check_new_events(cur, conn):
             except Exception as e:
                 logger.error(f"Email send error: {e}")
 
-        if (sev or "").lower() == "critical":
-            send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
+        send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
         
         set_cooldown(dname, cooldown_key)
 
