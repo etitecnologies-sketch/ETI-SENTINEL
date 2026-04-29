@@ -821,14 +821,29 @@ app.put("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
       }))
       .filter((s) => s.url);
 
-    if (enabled && streams.length === 0) {
-      return res.status(400).json({ error: "At least one RTSP stream is required" });
-    }
-
     const existing = await pool.query("SELECT password_enc FROM rtsp_configs WHERE device_id=$1", [deviceId]);
     let password_enc = existing.rows[0]?.password_enc || "";
     if (password === "") password_enc = "";
     else if (typeof password === "string" && password.length > 0) password_enc = encOnvif(password);
+
+    if (enabled && streams.length === 0) {
+      const dev = await pool.query("SELECT name, ip_address FROM devices WHERE id=$1", [deviceId]);
+      const ip = String(dev.rows[0]?.ip_address || "").trim();
+      const devName = String(dev.rows[0]?.name || "").trim();
+      if (!ip) return res.status(400).json({ error: "Device IP is required for auto RTSP" });
+      const streamName = devName || "Principal";
+      streams = [
+        {
+          channel: 1,
+          name: streamName,
+          url: `rtsp://{username}:{password}@${ip}:554/cam/realmonitor?channel=1&subtype=0`,
+          enabled: true,
+          timeout_seconds: 8,
+          interval_seconds: 30,
+          transport: "tcp",
+        },
+      ];
+    }
 
     const streamsJson = JSON.stringify(streams || []);
 
