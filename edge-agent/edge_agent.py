@@ -79,7 +79,17 @@ def _cleanup_orphans(here: Path, env: dict) -> None:
 
 def _sanitize(s) -> str:
     v = str(s or "").strip()
-    v = v.replace("`", "").replace('"', "").replace("'", "").strip()
+    v = (
+        v.replace("`", "")
+        .replace("´", "")
+        .replace("“", "")
+        .replace("”", "")
+        .replace("‘", "")
+        .replace("’", "")
+        .replace('"', "")
+        .replace("'", "")
+        .strip()
+    )
     return v
 
 
@@ -136,20 +146,26 @@ def run_check(here: Path, env: dict) -> int:
         print("ERRO: INGEST_API_URL não configurado")
         return 1
 
+    sess = requests.Session()
+
     def get(path: str, headers=None, params=None):
         url = ingest_api_url + path
-        try:
-            r = requests.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
-            ct = str(r.headers.get("content-type") or "")
-            if "application/json" in ct:
-                try:
-                    data = r.json()
-                    return r.status_code, json.dumps(_redact(data), ensure_ascii=False)[:240]
-                except Exception:
-                    return r.status_code, _short_body(r.text)
-            return r.status_code, _short_body(r.text)
-        except Exception as e:
-            return 0, _short_body(str(e))
+        last = None
+        for attempt in range(2):
+            try:
+                r = sess.get(url, headers=headers or {}, params=params or {}, timeout=(3, timeout))
+                ct = str(r.headers.get("content-type") or "")
+                if "application/json" in ct:
+                    try:
+                        data = r.json()
+                        return r.status_code, json.dumps(_redact(data), ensure_ascii=False)[:240]
+                    except Exception:
+                        return r.status_code, _short_body(r.text)
+                return r.status_code, _short_body(r.text)
+            except Exception as e:
+                last = e
+                time.sleep(0.4)
+        return 0, _short_body(str(last))
 
     code, body = (0, "")
     try:
