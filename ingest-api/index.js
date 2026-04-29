@@ -516,7 +516,7 @@ const WA_INSTANCE_GLOBAL = sanitize(process.env.WA_INSTANCE || "");
 const WA_TOKEN_GLOBAL = sanitize(process.env.WA_TOKEN || "");
 const WA_NUMBER_GLOBAL = sanitize(process.env.WA_NUMBER || "");
 const COLLECTOR_KEY = sanitize(process.env.COLLECTOR_KEY || "");
-const AUTO_ADOPT_DISCOVERY = sanitize(process.env.AUTO_ADOPT_DISCOVERY || "1") !== "0";
+const AUTO_ADOPT_DISCOVERY = sanitize(process.env.AUTO_ADOPT_DISCOVERY || "0") === "1";
 const DEFAULT_DISCOVERY_CLIENT_ID = (() => {
   const v = sanitize(process.env.DEFAULT_DISCOVERY_CLIENT_ID || "");
   const n = parseInt(v);
