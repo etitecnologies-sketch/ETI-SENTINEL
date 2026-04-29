@@ -62,6 +62,15 @@ def _parse_query(path: str) -> Dict[str, str]:
         return {}
 
 
+def _mask(s: Any) -> str:
+    v = sanitize(s)
+    if not v:
+        return ""
+    if len(v) <= 6:
+        return v
+    return v[:2] + "***" + v[-2:]
+
+
 class PushRelay:
     def __init__(self, here: Path, env: Dict[str, str], log_path: Path):
         self.here = here
@@ -139,37 +148,49 @@ class PushRelay:
                     if "telegram" in chans:
                         ctok = cfg.get("telegram_token") or ""
                         ccid = cfg.get("telegram_chat_id") or ""
-                        if ccid:
+                        if ctok and ccid:
                             dedupe.add("tg:" + ccid)
-                        send_telegram(msg, ctok, ccid, log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"))
+                        log_enabled = _bool(self.env.get("EDGE_NOTIFY_LOG") or "0")
+                        ok_client = send_telegram(msg, ctok, ccid, log=log_enabled)
                         gt = gcfg.get("telegram_token") or ""
                         gc = gcfg.get("telegram_chat_id") or ""
-                        if gc and ("tg:" + gc) not in dedupe:
-                            send_telegram(msg, gt, gc, log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"))
+                        ok_global = None
+                        if gt and gc and ("tg:" + gc) not in dedupe:
+                            ok_global = send_telegram(msg, gt, gc, log=log_enabled)
+                        if log_enabled:
+                            print(
+                                f"[Edge Notify] tg client={_mask(ccid)} ok={ok_client} | global={_mask(gc)} ok={ok_global}"
+                            )
                     if "whatsapp" in chans:
                         cwa = cfg.get("wa_number") or ""
-                        if cwa:
+                        if (cfg.get("wa_instance") or "") and (cfg.get("wa_token") or "") and cwa:
                             dedupe.add("wa:" + cwa.lstrip("+").replace("whatsapp:", ""))
-                        send_whatsapp_twilio(
+                        log_enabled = _bool(self.env.get("EDGE_NOTIFY_LOG") or "0")
+                        ok_client = send_whatsapp_twilio(
                             msg,
                             cfg.get("wa_instance") or "",
                             cfg.get("wa_token") or "",
                             cwa,
                             from_number=(gcfg.get("twilio_whatsapp_number") or sanitize(self.env.get("TWILIO_WHATSAPP_NUMBER") or "")),
                             content_sid=(gcfg.get("twilio_content_sid") or sanitize(self.env.get("TWILIO_CONTENT_SID") or "")),
-                            log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"),
+                            log=log_enabled,
                         )
                         gwa = gcfg.get("wa_number") or ""
                         gwa_key = gwa.lstrip("+").replace("whatsapp:", "")
-                        if gwa and ("wa:" + gwa_key) not in dedupe:
-                            send_whatsapp_twilio(
+                        ok_global = None
+                        if (gcfg.get("wa_instance") or "") and (gcfg.get("wa_token") or "") and gwa and ("wa:" + gwa_key) not in dedupe:
+                            ok_global = send_whatsapp_twilio(
                                 msg,
                                 gcfg.get("wa_instance") or "",
                                 gcfg.get("wa_token") or "",
                                 gwa,
                                 from_number=(gcfg.get("twilio_whatsapp_number") or sanitize(self.env.get("TWILIO_WHATSAPP_NUMBER") or "")),
                                 content_sid=(gcfg.get("twilio_content_sid") or sanitize(self.env.get("TWILIO_CONTENT_SID") or "")),
-                                log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"),
+                                log=log_enabled,
+                            )
+                        if log_enabled:
+                            print(
+                                f"[Edge Notify] wa client={_mask(cwa)} ok={ok_client} | global={_mask(gwa)} ok={ok_global}"
                             )
                 fired_count += 1
 
