@@ -230,6 +230,23 @@ class PushRelay:
         cid = self._client_id()
         if not url or not key or not cid:
             return
+        try:
+            r = self._sess.get(
+                url + "/collector/automation-rules",
+                headers={"x-collector-key": key},
+                params={"client_id": cid},
+                timeout=(5, 18),
+            )
+            if r.status_code != 200:
+                return
+            data = r.json() or []
+            if not isinstance(data, list):
+                return
+            with self._lock:
+                self._rules = data
+                self._last_rules_ts = time.time()
+        except Exception:
+            return
 
     def _refresh_global_notify(self) -> None:
         url = self._ingest_url()
