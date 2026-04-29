@@ -515,6 +515,12 @@ const WA_API_URL_GLOBAL = sanitize(process.env.WA_API_URL || "");
 const WA_INSTANCE_GLOBAL = sanitize(process.env.WA_INSTANCE || "");
 const WA_TOKEN_GLOBAL = sanitize(process.env.WA_TOKEN || "");
 const WA_NUMBER_GLOBAL = sanitize(process.env.WA_NUMBER || "");
+const TWILIO_ACCOUNT_SID_GLOBAL = sanitize(process.env.TWILIO_ACCOUNT_SID || "") || WA_INSTANCE_GLOBAL;
+const TWILIO_AUTH_TOKEN_GLOBAL = sanitize(process.env.TWILIO_AUTH_TOKEN || "") || WA_TOKEN_GLOBAL;
+const TWILIO_WHATSAPP_NUMBER_GLOBAL = sanitize(process.env.TWILIO_WHATSAPP_NUMBER || "");
+const TWILIO_CONTENT_SID_GLOBAL = sanitize(process.env.TWILIO_CONTENT_SID || "");
+const INSTANT_ANALYTICS_ALERTS = sanitize(process.env.INSTANT_ANALYTICS_ALERTS || "1") === "1";
+const INSTANT_ANALYTICS_LOG = sanitize(process.env.INSTANT_ANALYTICS_LOG || "0") === "1";
 const COLLECTOR_KEY = sanitize(process.env.COLLECTOR_KEY || "");
 const AUTO_ADOPT_DISCOVERY = sanitize(process.env.AUTO_ADOPT_DISCOVERY || "0") === "1";
 const DEFAULT_DISCOVERY_CLIENT_ID = (() => {
@@ -549,6 +555,126 @@ function decOnvif(payload) {
   } catch {
     return "";
   }
+}
+
+function _uniqueTargets(targets) {
+  const seen = new Set();
+  const out = [];
+  for (const t of targets) {
+    const key = `${t?.token || ""}|${t?.chat_id || ""}|${t?.number || ""}|${t?.account_sid || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+const _instantDedup = new Map();
+function _instantShouldSend(key, ttlMs) {
+  const now = Date.now();
+  const prev = _instantDedup.get(key);
+  if (prev && now - prev < ttlMs) return false;
+  _instantDedup.set(key, now);
+  return true;
+}
+
+async function _sendTelegramInstant(message, token, chatId) {
+  const tok = sanitize(token || "");
+  const cid = sanitize(chatId || "");
+  if (!tok || !cid) return;
+  const cleanTok = tok.toLowerCase().startsWith("bot") ? tok.slice(3) : tok;
+  const url = `https://api.telegram.org/bot${cleanTok}/sendMessage`;
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: cid, text: String(message || "") }),
+    });
+    if (INSTANT_ANALYTICS_LOG && !r.ok) {
+      const shortCid = cid.length > 6 ? `${cid.slice(0, 2)}***${cid.slice(-2)}` : cid;
+      console.log(`[Instant Alerts] Telegram failed status=${r.status} chat=${shortCid}`);
+    }
+  } catch (e) {
+    if (INSTANT_ANALYTICS_LOG) console.log(`[Instant Alerts] Telegram exception: ${String(e?.message || e)}`);
+  }
+}
+
+async function _sendWhatsAppTwilioInstant(message, accountSid, authToken, toNumber) {
+  const sid = sanitize(accountSid || "");
+  const tok = sanitize(authToken || "");
+  const numRaw = sanitize(toNumber || "");
+  if (!sid || !tok || !numRaw) return;
+  const to = numRaw.startsWith("+") ? numRaw : `+${numRaw}`;
+  const toFinal = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+
+  const fromFinal = TWILIO_WHATSAPP_NUMBER_GLOBAL || "whatsapp:+14155238886";
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+  const auth = Buffer.from(`${sid}:${tok}`).toString("base64");
+  const params = new URLSearchParams();
+  params.set("To", toFinal);
+  params.set("From", fromFinal);
+  if (TWILIO_CONTENT_SID_GLOBAL) {
+    params.set("ContentSid", TWILIO_CONTENT_SID_GLOBAL);
+    params.set("ContentVariables", JSON.stringify({ 1: String(message || "").slice(0, 1500) }));
+  } else {
+    params.set("Body", String(message || ""));
+  }
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+      body: params,
+    });
+    if (INSTANT_ANALYTICS_LOG && !(r.status === 200 || r.status === 201)) {
+      const maskedTo = toFinal.replace(/(\d)(?=\d{2})/g, "*");
+      console.log(`[Instant Alerts] WhatsApp(Twilio) failed status=${r.status} to=${maskedTo}`);
+    }
+  } catch (e) {
+    if (INSTANT_ANALYTICS_LOG) console.log(`[Instant Alerts] WhatsApp(Twilio) exception: ${String(e?.message || e)}`);
+  }
+}
+
+async function _sendInstantAnalyticsAlerts(devRow, eventType, channel, description) {
+  if (!INSTANT_ANALYTICS_ALERTS) return;
+  if (!devRow || !eventType) return;
+  const devName = String(devRow.name || "device");
+  const ch = Number(channel || 0) || 0;
+  const et = String(eventType || "");
+  const desc = String(description || "");
+
+  const dedupKey = `analytics|${devRow.id || devRow.device_id || ""}|${et}|${ch}|${desc}`;
+  if (!_instantShouldSend(dedupKey, 2500)) return;
+
+  const msgLines = [
+    "🎬 ALERTA ANALÍTICO",
+    `📷 ${devName}`,
+    `Evento: ${et}`,
+    `Canal: ${ch || "-"}`,
+    desc ? `Detalhes: ${desc}` : "",
+    `🕐 ${new Date().toISOString()}`,
+  ].filter(Boolean);
+  const msg = msgLines.join("\n");
+
+  const tgTargets = _uniqueTargets([
+    { token: devRow.telegram_token, chat_id: devRow.telegram_chat_id },
+    { token: TG_TOKEN_GLOBAL, chat_id: TG_CHAT_ID_GLOBAL },
+  ]);
+
+  const waTargets = _uniqueTargets([
+    { account_sid: devRow.wa_instance, auth_token: devRow.wa_token, number: devRow.wa_number },
+    { account_sid: TWILIO_ACCOUNT_SID_GLOBAL, auth_token: TWILIO_AUTH_TOKEN_GLOBAL, number: WA_NUMBER_GLOBAL },
+  ]);
+
+  if (INSTANT_ANALYTICS_LOG) {
+    console.log(
+      `[Instant Alerts] analytics dev=${String(devRow.id || "")} tg_targets=${tgTargets.length} wa_targets=${waTargets.length} type=${et}`
+    );
+  }
+
+  await Promise.all([
+    ...tgTargets.map((t) => _sendTelegramInstant(msg, t.token, t.chat_id)),
+    ...waTargets.map((t) => _sendWhatsAppTwilioInstant(msg, t.account_sid, t.auth_token, t.number)),
+  ]);
 }
 
 async function assertDeviceAccess(req, deviceId) {
@@ -1020,6 +1146,49 @@ app.get("/collector/devices", async (req, res) => {
   } catch (e) {
     console.error("/collector/devices error:", e.message);
     res.status(500).json({ error: "Failed to fetch devices", detail: e.message });
+  }
+});
+
+app.get("/collector/notify-config", async (req, res) => {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
+  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
+    const params = [];
+    let where = "1=1";
+    if (cid) {
+      params.push(cid);
+      where += ` AND id=$${params.length}`;
+    }
+    const r = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        telegram_token,
+        telegram_chat_id,
+        wa_instance,
+        wa_token,
+        wa_number
+      FROM clients
+      WHERE ${where}
+      ORDER BY id ASC
+      `,
+      params
+    );
+    res.json(
+      r.rows.map((row) => ({
+        client_id: row.id,
+        name: row.name,
+        telegram_configured: !!(row.telegram_token && row.telegram_chat_id),
+        whatsapp_configured: !!(row.wa_instance && row.wa_token && row.wa_number),
+      }))
+    );
+  } catch (e) {
+    console.error("/collector/notify-config error:", e.message);
+    res.status(500).json({ error: "Failed to fetch notify config", detail: e.message });
   }
 });
 
@@ -1745,11 +1914,20 @@ app.post("/push", metricsLimiter, async (req, res) => {
   try {
     const cleanToken = String(token).replace(/[:-]/g, "").toUpperCase();
     const dr = await pool.query(`
-      SELECT id, client_id, name 
-      FROM devices 
-      WHERE token=$1 
-         OR serial_number = $1
-         OR UPPER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = $2
+      SELECT
+        d.id,
+        d.client_id,
+        d.name,
+        c.telegram_token,
+        c.telegram_chat_id,
+        c.wa_instance,
+        c.wa_token,
+        c.wa_number
+      FROM devices d
+      LEFT JOIN clients c ON c.id = d.client_id
+      WHERE d.token=$1
+         OR d.serial_number = $1
+         OR UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $2
       LIMIT 1
     `, [token, cleanToken]);
 
@@ -1787,6 +1965,7 @@ app.post("/push", metricsLimiter, async (req, res) => {
       // ── Alertas (Centralizados no Processor) ──
       // O Processor (Python) monitora a tabela 'events' e envia para Telegram/WhatsApp
       // garantindo fuso horário correto e formatação padronizada.
+      _sendInstantAnalyticsAlerts(dev, finalEventType, finalChannel, finalDescription).catch(() => {});
     }
 
     // 3. WebSocket (Realtime)
