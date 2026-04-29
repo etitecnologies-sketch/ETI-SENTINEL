@@ -69,8 +69,10 @@ class PushRelay:
         self.log_path = log_path
         self._lock = threading.Lock()
         self._client_notify: Dict[str, str] = {}
+        self._global_notify: Dict[str, str] = {}
         self._rules: list = []
         self._last_cfg_ts = 0.0
+        self._last_global_cfg_ts = 0.0
         self._last_rules_ts = 0.0
         self._last_push_ok = 0.0
         self._queue_path = here / ".state" / "push_queue.jsonl"
@@ -91,6 +93,7 @@ class PushRelay:
             return {
                 "client_id": sanitize(self.env.get("CLIENT_ID") or ""),
                 "last_client_notify_fetch": self._last_cfg_ts,
+                "last_global_notify_fetch": self._last_global_cfg_ts,
                 "last_rules_fetch": self._last_rules_ts,
                 "last_push_ok": self._last_push_ok,
                 "queue_size": q,
@@ -115,6 +118,7 @@ class PushRelay:
         with self._lock:
             rules = list(self._rules or [])
             cfg = dict(self._client_notify or {})
+            gcfg = dict(self._global_notify or {})
 
         fired = self._engine.eval(rules)
         fired_count = 0
@@ -131,18 +135,42 @@ class PushRelay:
                     chans = a.get("channels") or ["telegram", "whatsapp"]
                     if not isinstance(chans, list):
                         chans = [str(chans)]
+                    dedupe = set()
                     if "telegram" in chans:
-                        send_telegram(msg, cfg.get("telegram_token") or "", cfg.get("telegram_chat_id") or "", log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"))
+                        ctok = cfg.get("telegram_token") or ""
+                        ccid = cfg.get("telegram_chat_id") or ""
+                        if ccid:
+                            dedupe.add("tg:" + ccid)
+                        send_telegram(msg, ctok, ccid, log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"))
+                        gt = gcfg.get("telegram_token") or ""
+                        gc = gcfg.get("telegram_chat_id") or ""
+                        if gc and ("tg:" + gc) not in dedupe:
+                            send_telegram(msg, gt, gc, log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"))
                     if "whatsapp" in chans:
+                        cwa = cfg.get("wa_number") or ""
+                        if cwa:
+                            dedupe.add("wa:" + cwa.lstrip("+").replace("whatsapp:", ""))
                         send_whatsapp_twilio(
                             msg,
                             cfg.get("wa_instance") or "",
                             cfg.get("wa_token") or "",
-                            cfg.get("wa_number") or "",
-                            from_number=sanitize(self.env.get("TWILIO_WHATSAPP_NUMBER") or ""),
-                            content_sid=sanitize(self.env.get("TWILIO_CONTENT_SID") or ""),
+                            cwa,
+                            from_number=(gcfg.get("twilio_whatsapp_number") or sanitize(self.env.get("TWILIO_WHATSAPP_NUMBER") or "")),
+                            content_sid=(gcfg.get("twilio_content_sid") or sanitize(self.env.get("TWILIO_CONTENT_SID") or "")),
                             log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"),
                         )
+                        gwa = gcfg.get("wa_number") or ""
+                        gwa_key = gwa.lstrip("+").replace("whatsapp:", "")
+                        if gwa and ("wa:" + gwa_key) not in dedupe:
+                            send_whatsapp_twilio(
+                                msg,
+                                gcfg.get("wa_instance") or "",
+                                gcfg.get("wa_token") or "",
+                                gwa,
+                                from_number=(gcfg.get("twilio_whatsapp_number") or sanitize(self.env.get("TWILIO_WHATSAPP_NUMBER") or "")),
+                                content_sid=(gcfg.get("twilio_content_sid") or sanitize(self.env.get("TWILIO_CONTENT_SID") or "")),
+                                log=_bool(self.env.get("EDGE_NOTIFY_LOG") or "0"),
+                            )
                 fired_count += 1
 
         forwarded = self._forward_push(payload, source)
@@ -162,6 +190,7 @@ class PushRelay:
         while not self._stop:
             try:
                 self._refresh_client_notify()
+                self._refresh_global_notify()
                 self._refresh_rules()
             except Exception:
                 pass
@@ -200,6 +229,34 @@ class PushRelay:
         key = self._collector_key()
         cid = self._client_id()
         if not url or not key or not cid:
+            return
+
+    def _refresh_global_notify(self) -> None:
+        url = self._ingest_url()
+        key = self._collector_key()
+        if not url or not key:
+            return
+        try:
+            r = self._sess.get(
+                url + "/collector/global-notify",
+                headers={"x-collector-key": key},
+                timeout=(5, 18),
+            )
+            if r.status_code != 200:
+                return
+            data = r.json() or {}
+            with self._lock:
+                self._global_notify = {
+                    "telegram_token": sanitize(data.get("telegram_token") or ""),
+                    "telegram_chat_id": sanitize(data.get("telegram_chat_id") or ""),
+                    "wa_instance": sanitize(data.get("wa_instance") or ""),
+                    "wa_token": sanitize(data.get("wa_token") or ""),
+                    "wa_number": sanitize(data.get("wa_number") or ""),
+                    "twilio_whatsapp_number": sanitize(data.get("twilio_whatsapp_number") or ""),
+                    "twilio_content_sid": sanitize(data.get("twilio_content_sid") or ""),
+                }
+                self._last_global_cfg_ts = time.time()
+        except Exception:
             return
         try:
             r = self._sess.get(

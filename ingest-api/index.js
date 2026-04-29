@@ -1245,6 +1245,27 @@ app.get("/collector/client-notify", async (req, res) => {
   }
 });
 
+app.get("/collector/global-notify", async (req, res) => {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
+  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    res.json({
+      telegram_token: sanitize(process.env.TELEGRAM_TOKEN || ""),
+      telegram_chat_id: sanitize(process.env.TELEGRAM_CHAT_ID || ""),
+      wa_instance: sanitize(process.env.TWILIO_ACCOUNT_SID || ""),
+      wa_token: sanitize(process.env.TWILIO_AUTH_TOKEN || ""),
+      wa_number: sanitize(process.env.WA_NUMBER || ""),
+      twilio_whatsapp_number: sanitize(process.env.TWILIO_WHATSAPP_NUMBER || ""),
+      twilio_content_sid: sanitize(process.env.TWILIO_CONTENT_SID || ""),
+    });
+  } catch (e) {
+    console.error("/collector/global-notify error:", e.message);
+    res.status(500).json({ error: "Failed to fetch global notify", detail: e.message });
+  }
+});
+
 app.get("/collector/automation-rules", async (req, res) => {
   const key = sanitize(req.headers["x-collector-key"] || "");
   if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
