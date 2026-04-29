@@ -554,6 +554,7 @@ def send_status_summary(cur):
            f"🏢 Clientes ativos: <b>{clients_count}</b>",
            f"🟢 Devices online: <b>{online}</b>  🔴 Offline: <b>{offline}</b>",f"━━━━━━━━━━━━━━━━━━━━",f"🕐 {now_str()}"]
     send_telegram("\n".join(lines))
+    send_whatsapp("\n".join(lines).replace("<b>", "*").replace("</b>", "*"))
     logger.info("Status summary sent")
 
 def evaluate_triggers(cur, conn):
@@ -699,20 +700,24 @@ def main():
     # Teste de envio IMEDIATO ao iniciar para diagnosticar credenciais
     if TG_TOKEN and TG_CHAT_ID:
         logger.info(f"Enviando alerta de teste de inicialização para {TG_CHAT_ID}...")
-        send_telegram(f"🔧 <b>{APP_NAME}</b>: Monitor de Alertas Reiniciado.\nVerificando conectividade... ✅")
+        test_msg = f"🔧 <b>{APP_NAME}</b>: Monitor de Alertas Reiniciado.\nVerificando conectividade... ✅"
+        send_telegram(test_msg)
+        send_whatsapp(test_msg.replace("<b>", "*").replace("</b>", "*"))
     else:
         logger.error("ERRO: TELEGRAM_TOKEN ou TELEGRAM_CHAT_ID não configurados!")
 
     logger.info(f"  telegram={'ON' if TG_TOKEN else 'OFF'} | chat_id={TG_CHAT_ID[:5]}***")
     logger.info(f"  email={'ON' if SMTP_HOST else 'OFF'}")
     logger.info(f"{'='*52}")
-    send_telegram(
+    startup_msg = (
         f"🚀 <b>{APP_NAME} iniciado!</b>\n━━━━━━━━━━━━━━━━━━━━\n"
         f"⏱ Checagem: <b>{EVAL_INTERVAL}s</b>\n📡 Ping: <b>{PING_TIMEOUT}s timeout</b>\n"
         f"📴 Offline timeout: <b>{OFFLINE_TIMEOUT}s</b>\n🔕 Cooldown: <b>{ALERT_COOLDOWN}s</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n✅ Multi-tenant ATIVO\n✅ Ping Monitor ATIVO\n✅ SNMP Monitor ATIVO\n"
         f"━━━━━━━━━━━━━━━━━━━━\n🕐 {now_str()} #etisentinel"
     )
+    send_telegram(startup_msg)
+    send_whatsapp(startup_msg.replace("<b>", "*").replace("</b>", "*"))
     while True:
         try: evaluate_once()
         except Exception as e: logger.exception(f"Error: {e}")

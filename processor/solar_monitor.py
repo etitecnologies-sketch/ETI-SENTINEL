@@ -1,4 +1,4 @@
-import os, time, logging, requests, datetime, hashlib, json
+import os, time, logging, requests, datetime, hashlib, json, re
 from contextlib import contextmanager
 import psycopg2
 
@@ -11,6 +11,17 @@ TG_TOKEN     = os.getenv("TELEGRAM_TOKEN", "")
 TG_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 SOLAR_INTERVAL = int(os.getenv("SOLAR_INTERVAL", "60"))  # coleta a cada 60s
 ALERT_COOLDOWN = int(os.getenv("ALERT_COOLDOWN", "3600")) # alerta a cada 1h
+
+def sanitize(val): return re.sub(r'["\'`\s]', '', val) if val else ""
+
+TWILIO_ACCOUNT_SID = sanitize(os.getenv("TWILIO_ACCOUNT_SID", ""))
+TWILIO_AUTH_TOKEN = sanitize(os.getenv("TWILIO_AUTH_TOKEN", ""))
+TWILIO_WHATSAPP_NUMBER = sanitize(os.getenv("TWILIO_WHATSAPP_NUMBER", ""))
+TWILIO_CONTENT_SID = sanitize(os.getenv("TWILIO_CONTENT_SID", ""))
+
+WA_INSTANCE = sanitize(os.getenv("WA_INSTANCE", ""))
+WA_TOKEN    = sanitize(os.getenv("WA_TOKEN", ""))
+WA_NUMBER   = sanitize(os.getenv("WA_NUMBER", ""))
 
 alert_cooldown_map = {}
 inverter_state     = {}  # id -> ultimo status
@@ -63,14 +74,47 @@ def send_telegram(message, token=None, chat_id=None):
                     logger.info(f"Telegram ✓ solar fallback -> {cid}")
         except Exception as e: logger.error(f"Telegram: {e}")
 
-def get_client_telegram(cur, client_id):
-    if not client_id: return None, None
+def send_whatsapp(message, instance=None, token=None, number=None):
+    account_sid = sanitize(instance) or TWILIO_ACCOUNT_SID or WA_INSTANCE
+    auth_token = sanitize(token) or TWILIO_AUTH_TOKEN or WA_TOKEN
+    num = sanitize(number) or WA_NUMBER
+    if not account_sid or not auth_token or not num:
+        return
+
     try:
-        cur.execute("SELECT telegram_token, telegram_chat_id FROM clients WHERE id=%s", (client_id,))
+        auth = (account_sid, auth_token)
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+
+        dest_num = num if num.startswith("+") else f"+{num}"
+        if not dest_num.startswith("whatsapp:"):
+            dest_num = f"whatsapp:{dest_num}"
+
+        sender_num = TWILIO_WHATSAPP_NUMBER or os.getenv("TWILIO_WHATSAPP_NUMBER", "") or "whatsapp:+14155238886"
+
+        payload = {"To": dest_num, "From": sender_num}
+        content_sid = TWILIO_CONTENT_SID or os.getenv("TWILIO_CONTENT_SID", "")
+        if content_sid:
+            payload["ContentSid"] = content_sid
+            payload["ContentVariables"] = json.dumps({"1": message[:1500]}, ensure_ascii=False)
+        else:
+            payload["Body"] = message
+
+        r = requests.post(url, data=payload, auth=auth, timeout=15)
+        if r.status_code in [200, 201]:
+            logger.info(f"WhatsApp (Twilio) ✓ solar -> {dest_num}")
+        else:
+            logger.error(f"WhatsApp (Twilio) error ({r.status_code}): {r.text}")
+    except Exception as e:
+        logger.error(f"WhatsApp (Twilio) exception: {e}")
+
+def get_client_config(cur, client_id):
+    if not client_id: return None, None, None, None, None
+    try:
+        cur.execute("SELECT telegram_token, telegram_chat_id, wa_instance, wa_token, wa_number FROM clients WHERE id=%s", (client_id,))
         row = cur.fetchone()
-        if row: return row[0], row[1]
+        if row: return row[0], row[1], row[2], row[3], row[4]
     except: pass
-    return None, None
+    return None, None, None, None, None
 
 # ── Salvar métrica ────────────────────────────────────────────
 def save_metric(cur, conn, inv, data):
@@ -108,7 +152,7 @@ def save_metric(cur, conn, inv, data):
         conn.rollback()
 
 # ── Verificar alertas ─────────────────────────────────────────
-def check_solar_alerts(cur, inv, data, tg_tok, tg_cid):
+def check_solar_alerts(cur, inv, data, tg_tok, tg_cid, wa_inst, wa_tok, wa_num):
     inv_id   = inv["id"]
     inv_name = inv["name"]
     status   = data.get("status", "unknown")
@@ -133,6 +177,7 @@ def check_solar_alerts(cur, inv, data, tg_tok, tg_cid):
                    f"Status: {status.upper()}\n"
                    f"Indicação: Verifique o inversor e a conexão com a rede.")
             send_telegram(msg, tg_tok, tg_cid)
+            send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
             logger.warning(f"SOLAR OFFLINE: {inv_name}")
 
     # Alerta: inversor voltou a gerar
@@ -147,6 +192,7 @@ def check_solar_alerts(cur, inv, data, tg_tok, tg_cid):
                    f"Local: {elocation}\n"
                    f"Potência atual: {power:.0f}W")
             send_telegram(msg, tg_tok, tg_cid)
+            send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
 
     inverter_state[inv_id] = status
 
@@ -178,6 +224,7 @@ def check_solar_alerts(cur, inv, data, tg_tok, tg_cid):
                    f"━━━━━━━━━━━━━━━━━━━━\n"
                    f"🕐 {now_str()} #solar #etisentinel")
             send_telegram(msg, tg_tok, tg_cid)
+            send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
 
 # ════════════════════════════════════════════════════════════
 #  COLETORES POR MARCA
@@ -708,8 +755,8 @@ def run_solar_monitor():
                 data = collect_inverter(inv)
                 if data:
                     save_metric(cur, conn, inv, data)
-                    tg_tok, tg_cid = get_client_telegram(cur, inv.get("client_id"))
-                    check_solar_alerts(cur, inv, data, tg_tok, tg_cid)
+                    tg_tok, tg_cid, wa_inst, wa_tok, wa_num = get_client_config(cur, inv.get("client_id"))
+                    check_solar_alerts(cur, inv, data, tg_tok, tg_cid, wa_inst, wa_tok, wa_num)
                 else:
                     logger.warning(f"Sem dados: {inv['name']} ({inv['brand']})")
             except Exception as e:
