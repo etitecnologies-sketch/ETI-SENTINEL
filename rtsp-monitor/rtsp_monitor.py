@@ -17,11 +17,12 @@ def _bool(v: Any) -> bool:
     return str(v or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _post_push(ingest_api_url: str, token: str, event_type: str, channel: int, description: str, severity: str) -> None:
+def _post_push(ingest_api_url: str, token: str, device_id: int, event_type: str, channel: int, description: str, severity: str) -> None:
     edge_push = _sanitize(os.getenv("EDGE_PUSH_URL") or "")
     url = edge_push or (ingest_api_url.rstrip("/") + "/push")
     payload: Dict[str, Any] = {
         "token": token,
+        "device_id": int(device_id or 0),
         "event_type": event_type,
         "channel": channel,
         "severity": severity,
@@ -158,11 +159,11 @@ def main() -> None:
                     desc = f"RTSP sem vídeo ({display})"
                     if err:
                         desc = f"{desc} - {err}"
-                    _post_push(ingest_api_url, token, "videoloss_started", channel, desc, "warn")
+                    _post_push(ingest_api_url, token, device_id, "videoloss_started", channel, desc, "warn")
                     logging.warning("[%s] %s -> OFF (%s)", name, display, err or "fail")
                 elif prev is False and ok is True:
                     desc = f"RTSP voltou ({display})"
-                    _post_push(ingest_api_url, token, "videoloss_stopped", channel, desc, "info")
+                    _post_push(ingest_api_url, token, device_id, "videoloss_stopped", channel, desc, "info")
                     logging.info("[%s] %s -> ON", name, display)
 
         for k in list(next_run.keys()):

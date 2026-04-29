@@ -103,11 +103,12 @@ def _normalize_event(topic: str, src: Dict[str, Any], data: Dict[str, Any]) -> T
     return event_type, channel, description, severity
 
 
-def _post_push(ingest_api_url: str, token: str, event_type: str, channel: int, description: str, severity: str) -> None:
+def _post_push(ingest_api_url: str, token: str, device_id: int, event_type: str, channel: int, description: str, severity: str) -> None:
     edge_push = _sanitize(os.getenv("EDGE_PUSH_URL") or "")
     url = edge_push or (ingest_api_url.rstrip("/") + "/push")
     payload: Dict[str, Any] = {
         "token": token,
+        "device_id": int(device_id or 0),
         "event_type": event_type,
         "channel": channel,
         "severity": severity,
@@ -210,7 +211,7 @@ def _run_device(
                             continue
                         last_state[key] = state
 
-                        _post_push(ingest_api_url, token, event_type, channel, description, severity)
+                        _post_push(ingest_api_url, token, device_id, event_type, channel, description, severity)
                         logging.info("[%s] Evento enviado: %s ch=%s", name, event_type, channel)
                     except Exception as e:
                         logging.warning("[%s] Falha ao processar evento: %s", name, e)

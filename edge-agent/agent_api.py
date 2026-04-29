@@ -546,7 +546,10 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         data = self.rfile.read(n)
         try:
-            return json.loads(data.decode("utf-8"))
+            txt = data.decode("utf-8", errors="replace")
+            if txt.startswith("\ufeff"):
+                txt = txt.lstrip("\ufeff")
+            return json.loads(txt)
         except Exception:
             return {}
 
