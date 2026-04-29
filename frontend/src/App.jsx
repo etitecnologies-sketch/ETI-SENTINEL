@@ -1318,6 +1318,7 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
   const [filter, setFilter] = useState({ type: "", status: "", client: "", search: "" });
   const [testing, setTesting] = useState(null);
   const [discovered, setDiscovered] = useState([]);
+  const [showAdoptedDiscovered, setShowAdoptedDiscovered] = useState(false);
   const [discErr, setDiscErr] = useState("");
   const [discLoading, setDiscLoading] = useState(false);
   const [discNames, setDiscNames] = useState({});
@@ -1362,6 +1363,11 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
       return next;
     });
   }, [discovered]);
+
+  const existingIps = new Set(devices.map((d) => String(d.ip_address || "").trim()).filter(Boolean));
+  const discoveredVisible = showAdoptedDiscovered
+    ? discovered
+    : discovered.filter((d) => !d.device_id && !existingIps.has(String(d.ip_address || "").trim()));
 
   const del = async (id) => { if (!confirm("Remover este dispositivo?")) return; await api(`/devices/${id}`, { method: "DELETE" }); load(); };
   const regenToken = async (id) => { const d = await api(`/devices/${id}/regenerate-token`, { method: "POST" }); setTokenModal(d.token); load(); };
@@ -1423,10 +1429,21 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
             <div style={{ fontWeight: 800, color: "#fff", letterSpacing: 0.5 }}>🔎 Descobertos na rede local</div>
             <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Encontrados pelo agente (varredura + ONVIF WS-Discovery). Um clique para adicionar.</div>
           </div>
-          <button style={S.btnSm()} onClick={loadDiscovered} disabled={discLoading}>{discLoading ? "..." : "Atualizar"}</button>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#b8cfe8", cursor: "pointer", fontWeight: 700 }}>
+              <input
+                type="checkbox"
+                style={{ accentColor: "#3b9eff", transform: "scale(1.1)" }}
+                checked={showAdoptedDiscovered}
+                onChange={(e) => setShowAdoptedDiscovered(e.target.checked)}
+              />
+              Mostrar adicionados
+            </label>
+            <button style={S.btnSm()} onClick={loadDiscovered} disabled={discLoading}>{discLoading ? "..." : "Atualizar"}</button>
+          </div>
         </div>
         {discErr && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 10 }}>⚠️ {discErr}</div>}
-        {discovered.length === 0 ? (
+        {discoveredVisible.length === 0 ? (
           <div style={{ color: "#4a6080", fontSize: 12, padding: "10px 0" }}>
             {discLoading ? "Carregando..." : "Nenhum equipamento descoberto nas últimas 24h."}
           </div>
@@ -1445,7 +1462,7 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
                 </tr>
               </thead>
               <tbody>
-                {discovered.map((d) => {
+                {discoveredVisible.map((d) => {
                   const ports = Array.isArray(d.open_ports) ? d.open_ports.join(", ") : "";
                   const adopted = !!d.device_id;
                   const hasOnvif = !!(d.onvif_xaddrs && String(d.onvif_xaddrs).trim());
