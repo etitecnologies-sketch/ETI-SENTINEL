@@ -105,6 +105,15 @@ def build_message(rule_row: Dict[str, Any], matched: List[Dict[str, Any]], defau
             msg = msg.replace(f"{{e{i}.device_id}}", _sanitize(ev.get("device_id") or ""))
             msg = msg.replace(f"{{e{i}.channel}}", _sanitize(ev.get("channel") or ""))
             msg = msg.replace(f"{{e{i}.severity}}", _sanitize(ev.get("severity") or ""))
+            try:
+                for k, v in (ev or {}).items():
+                    if not isinstance(k, str):
+                        continue
+                    if k.startswith("_"):
+                        continue
+                    msg = msg.replace(f"{{e{i}.{k}}}", _sanitize(v))
+            except Exception:
+                pass
         return msg
 
     bits = [default_prefix, "Automação", name]
@@ -114,4 +123,3 @@ def build_message(rule_row: Dict[str, Any], matched: List[Dict[str, Any]], defau
         ch = _sanitize(ev.get("channel") or "")
         bits.append(f"{et} dev={did} ch={ch}".strip())
     return " | ".join([b for b in bits if b])
-

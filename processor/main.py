@@ -540,6 +540,45 @@ def fire_alert(cur,conn,trigger_id,name,host,expr,value,threshold,device_id=None
     send_email(f"[{APP_NAME}] {sev_icon} {sev_label}: {name} em {host}",
         f"ALERTA {sev_label}\n\nTrigger: {name}\nHost: {host}\nDevice: {dname or 'N/A'}\nMAC: {mac}\nSN: {sn}\nCliente: {cl_name or 'N/A'}\nMétrica: {meta['label']} = {value:.1f}{unit}\nLimite: {threshold}{unit}\nHorário: {now_str()}", cl_email)
 
+def resolve_threshold_alert(cur, conn, alert_id, trigger_name, host, expr, value, threshold, device_id=None, client_id=None):
+    try:
+        cur.execute("UPDATE alerts SET resolved_at=NOW() WHERE id=%s", (alert_id,))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Alert resolve: {e}")
+        conn.rollback()
+        return
+
+    unit=get_unit(expr)
+    meta=SEVERITY.get(expr,{"icon":"📊","label":expr})
+    dtype,tags,dname,mac,sn,ddesc=None,[],None,None,None,None
+    tg_tok, tg_cid, cl_email, cl_name, wa_inst, wa_tok, wa_num = get_client_config(cur, client_id)
+    if device_id:
+        try:
+            cur.execute("SELECT device_type,tags,name,mac_address,serial_number,description FROM devices WHERE id=%s",(device_id,))
+            row=cur.fetchone()
+            if row: dtype,tags,dname,mac,sn,ddesc=row[0],row[1] or [],row[2],row[3],row[4],row[5]
+        except: pass
+
+    edname = escape_html(dname or host)
+    ehost = escape_html(host)
+    emeta_label = escape_html(meta["label"])
+    etrigger_name = escape_html(trigger_name)
+    msg=(
+        f"✅ <b>{edname}</b>\n"
+        f"Normalizado: {emeta_label} voltou ao normal\n\n"
+        f"Trigger: <b>{etrigger_name}</b>\n"
+        f"Host: <b>{ehost}</b>\n"
+        f"Valor atual: <b>{float(value):.1f}{unit}</b> (limite: {float(threshold):.1f}{unit})\n"
+        f"Data da Normalização: <b>{now_display()}</b>\n"
+        f"Detalhes do Equipamento: {escape_html(dtype or 'other')} - {escape_html(mac or sn or 'N/A')}\n"
+        f"Descrição: {escape_html(cl_name or 'ETI SENTINEL')}\n"
+        + (f"Empresa: {escape_html(ddesc)}\n" if ddesc else "")
+        + "Indicação: Nenhuma ação necessária."
+    )
+    send_telegram(msg, tg_tok, tg_cid)
+    send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
+
 def send_status_summary(cur):
     global last_summary_time
     if (time.time()-last_summary_time)<3600: return
@@ -575,6 +614,19 @@ def evaluate_triggers(cur, conn):
     metrics=cur.fetchall()
     if not metrics: return
 
+    cur.execute("""
+        SELECT id, trigger_id, device_id, host, expression, threshold, client_id
+        FROM alerts
+        WHERE alert_type='threshold' AND resolved_at IS NULL
+    """)
+    open_rows = cur.fetchall()
+    open_by_key = {}
+    for aid, trig_id, dev_id, host, expr, thr, cid in open_rows:
+        k = (int(trig_id or 0), int(dev_id or 0), str(host or ""), str(expr or ""), int(cid or 0))
+        prev = open_by_key.get(k)
+        if prev is None or int(aid) > int(prev[0]):
+            open_by_key[k] = (aid, thr)
+
     expr_idx={"cpu":1,"memory":2,"disk_percent":3,"latency_ms":4,"load_avg":5,"temperature":6}
     for trigger_id,name,expr,threshold,trigger_client_id in triggers:
         idx=expr_idx.get(expr)
@@ -590,8 +642,22 @@ def evaluate_triggers(cur, conn):
             vals=[None,cpu,memory,disk,latency,load,temp]
             value=vals[idx]
             
-            if value is not None and float(value)>float(threshold):
-                fire_alert(cur,conn,trigger_id,name,host,expr,value,threshold,device_id,device_client_id or trigger_client_id)
+            eff_client_id = device_client_id or trigger_client_id
+            if value is None:
+                continue
+            if float(value)>float(threshold):
+                fire_alert(cur,conn,trigger_id,name,host,expr,value,threshold,device_id,eff_client_id)
+            else:
+                k = (int(trigger_id or 0), int(device_id or 0), str(host or ""), str(expr or ""), int(eff_client_id or 0))
+                open_alert = open_by_key.get(k)
+                if not open_alert:
+                    continue
+                if is_in_cooldown(host, f"resolved:{expr}:{trigger_id}"):
+                    continue
+                alert_id, open_thr = open_alert[0], open_alert[1]
+                resolve_threshold_alert(cur, conn, alert_id, name, host, expr, value, open_thr, device_id, eff_client_id)
+                set_cooldown(host, f"resolved:{expr}:{trigger_id}")
+                open_by_key.pop(k, None)
 
 def check_new_events(cur, conn):
     """Monitora a tabela de eventos (analíticos) e envia para o Telegram"""

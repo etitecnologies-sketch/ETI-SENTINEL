@@ -1133,7 +1133,11 @@ app.get("/collector/devices", async (req, res) => {
         ddns_address,
         monitor_ping,
         monitor_port,
-        device_type
+        device_type,
+        mac_address,
+        serial_number,
+        hostname,
+        tags
       FROM devices
       WHERE ${where}
       ORDER BY id ASC
@@ -1152,6 +1156,10 @@ app.get("/collector/devices", async (req, res) => {
         monitor_ping: row.monitor_ping === true,
         monitor_port: parseInt(row.monitor_port) || 0,
         device_type: row.device_type || "",
+        mac_address: row.mac_address || "",
+        serial_number: row.serial_number || "",
+        hostname: row.hostname || "",
+        tags: Array.isArray(row.tags) ? row.tags : [],
       }))
     );
   } catch (e) {
@@ -1254,8 +1262,8 @@ app.get("/collector/global-notify", async (req, res) => {
     res.json({
       telegram_token: sanitize(process.env.TELEGRAM_TOKEN || ""),
       telegram_chat_id: sanitize(process.env.TELEGRAM_CHAT_ID || ""),
-      wa_instance: sanitize(process.env.TWILIO_ACCOUNT_SID || ""),
-      wa_token: sanitize(process.env.TWILIO_AUTH_TOKEN || ""),
+      wa_instance: sanitize(process.env.TWILIO_ACCOUNT_SID || process.env.WA_INSTANCE || ""),
+      wa_token: sanitize(process.env.TWILIO_AUTH_TOKEN || process.env.WA_TOKEN || ""),
       wa_number: sanitize(process.env.WA_NUMBER || ""),
       twilio_whatsapp_number: sanitize(process.env.TWILIO_WHATSAPP_NUMBER || ""),
       twilio_content_sid: sanitize(process.env.TWILIO_CONTENT_SID || ""),

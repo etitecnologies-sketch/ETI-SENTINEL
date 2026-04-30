@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from camera_collector import _sanitize as sanitize
 from camera_collector import discover_cameras
+from edge_alert_format import format_telegram_alert
 from edge_notify import send_telegram, send_whatsapp_twilio
 from edge_rules import RuleEngine, build_message
 
@@ -80,9 +81,11 @@ class PushRelay:
         self._client_notify: Dict[str, str] = {}
         self._global_notify: Dict[str, str] = {}
         self._rules: list = []
+        self._devices_by_id: Dict[int, Dict[str, Any]] = {}
         self._last_cfg_ts = 0.0
         self._last_global_cfg_ts = 0.0
         self._last_rules_ts = 0.0
+        self._last_devices_ts = 0.0
         self._last_push_ok = 0.0
         self._queue_path = here / ".state" / "push_queue.jsonl"
         self._engine = RuleEngine()
@@ -104,6 +107,7 @@ class PushRelay:
                 "last_client_notify_fetch": self._last_cfg_ts,
                 "last_global_notify_fetch": self._last_global_cfg_ts,
                 "last_rules_fetch": self._last_rules_ts,
+                "last_devices_fetch": self._last_devices_ts,
                 "last_push_ok": self._last_push_ok,
                 "queue_size": q,
                 "rules_count": len(self._rules or []),
@@ -122,12 +126,29 @@ class PushRelay:
             "device_id": int(payload.get("device_id") or 0) if str(payload.get("device_id") or "").isdigit() else None,
             "source": sanitize(source or payload.get("source") or "edge"),
         }
+        try:
+            for k, v in (payload or {}).items():
+                kk = sanitize(k)
+                if not kk:
+                    continue
+                lk = kk.lower()
+                if lk in {"token", "password", "pass"} or "token" in lk or "pass" in lk:
+                    continue
+                if kk in ev or kk.startswith("_"):
+                    continue
+                if isinstance(v, (int, float)):
+                    ev[kk] = v
+                elif isinstance(v, str) and len(v) <= 200:
+                    ev[kk] = sanitize(v)
+        except Exception:
+            pass
         self._engine.push_event(ev)
 
         with self._lock:
             rules = list(self._rules or [])
             cfg = dict(self._client_notify or {})
             gcfg = dict(self._global_notify or {})
+            devs = dict(self._devices_by_id or {})
 
         fired = self._engine.eval(rules)
         fired_count = 0
@@ -135,7 +156,8 @@ class PushRelay:
             for rule_row, matched in fired:
                 rule = rule_row.get("rule") or {}
                 actions = rule.get("actions") or []
-                msg = build_message(rule_row, matched)
+                base_msg = build_message(rule_row, matched)
+                msg = format_telegram_alert(base_msg, matched, devs, cfg.get("client_name") or "")
                 for a in actions:
                     if not isinstance(a, dict):
                         continue
@@ -213,6 +235,7 @@ class PushRelay:
                 self._refresh_client_notify()
                 self._refresh_global_notify()
                 self._refresh_rules()
+                self._refresh_devices()
             except Exception:
                 pass
             time.sleep(max(3, int(self.env.get("EDGE_REFRESH_SECONDS") or 10)))
@@ -235,6 +258,7 @@ class PushRelay:
             data = r.json() or {}
             with self._lock:
                 self._client_notify = {
+                    "client_name": sanitize(data.get("name") or ""),
                     "telegram_token": sanitize(data.get("telegram_token") or ""),
                     "telegram_chat_id": sanitize(data.get("telegram_chat_id") or ""),
                     "wa_instance": sanitize(data.get("wa_instance") or ""),
@@ -296,9 +320,16 @@ class PushRelay:
                 self._last_global_cfg_ts = time.time()
         except Exception:
             return
+
+    def _refresh_devices(self) -> None:
+        url = self._ingest_url()
+        key = self._collector_key()
+        cid = self._client_id()
+        if not url or not key or not cid:
+            return
         try:
             r = self._sess.get(
-                url + "/collector/automation-rules",
+                url + "/collector/devices",
                 headers={"x-collector-key": key},
                 params={"client_id": cid},
                 timeout=(5, 18),
@@ -308,9 +339,27 @@ class PushRelay:
             data = r.json() or []
             if not isinstance(data, list):
                 return
+            by_id: Dict[int, Dict[str, Any]] = {}
+            for row in data:
+                if not isinstance(row, dict):
+                    continue
+                did = row.get("device_id")
+                did_int = int(did) if str(did or "").isdigit() else None
+                if did_int is None:
+                    continue
+                by_id[did_int] = {
+                    "device_id": did_int,
+                    "name": sanitize(row.get("name") or ""),
+                    "device_type": sanitize(row.get("device_type") or ""),
+                    "ip_address": sanitize(row.get("ip_address") or ""),
+                    "ddns_address": sanitize(row.get("ddns_address") or ""),
+                    "hostname": sanitize(row.get("hostname") or ""),
+                    "mac_address": sanitize(row.get("mac_address") or ""),
+                    "serial_number": sanitize(row.get("serial_number") or ""),
+                }
             with self._lock:
-                self._rules = data
-                self._last_rules_ts = time.time()
+                self._devices_by_id = by_id
+                self._last_devices_ts = time.time()
         except Exception:
             return
 

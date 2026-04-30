@@ -1317,11 +1317,6 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
   const [tokenModal, setTokenModal] = useState(null);
   const [filter, setFilter] = useState({ type: "", status: "", client: "", search: "" });
   const [testing, setTesting] = useState(null);
-  const [discovered, setDiscovered] = useState([]);
-  const [showAdoptedDiscovered, setShowAdoptedDiscovered] = useState(false);
-  const [discErr, setDiscErr] = useState("");
-  const [discLoading, setDiscLoading] = useState(false);
-  const [discNames, setDiscNames] = useState({});
 
   const load = useCallback(() => {
     api("/devices").then((data) => {
@@ -1335,39 +1330,6 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
     const t = setInterval(load, 2000); // REFRESH CADA 2 SEGUNDOS (MODO REAL-TIME)
     return () => clearInterval(t); 
   }, [load]);
-
-  const loadDiscovered = useCallback(() => {
-    setDiscLoading(true);
-    setDiscErr("");
-    api("/discovered-devices")
-      .then((data) => setDiscovered(Array.isArray(data) ? data : []))
-      .catch((e) => setDiscErr(e?.error || e?.message || "Falha ao carregar descobertos"))
-      .finally(() => setDiscLoading(false));
-  }, []);
-
-  useEffect(() => {
-    loadDiscovered();
-    const t = setInterval(loadDiscovered, 15000);
-    return () => clearInterval(t);
-  }, [loadDiscovered]);
-
-  useEffect(() => {
-    setDiscNames((prev) => {
-      const next = { ...prev };
-      for (const d of discovered) {
-        if (next[d.id] != null) continue;
-        const ip = String(d.ip_address || "");
-        const defName = d.hostname || `${(d.guess_type || "device")}-${ip.replace(/\./g, "-")}`;
-        next[d.id] = defName;
-      }
-      return next;
-    });
-  }, [discovered]);
-
-  const existingIps = new Set(devices.map((d) => String(d.ip_address || "").trim()).filter(Boolean));
-  const discoveredVisible = showAdoptedDiscovered
-    ? discovered
-    : discovered.filter((d) => !d.device_id && !existingIps.has(String(d.ip_address || "").trim()));
 
   const del = async (id) => { if (!confirm("Remover este dispositivo?")) return; await api(`/devices/${id}`, { method: "DELETE" }); load(); };
   const regenToken = async (id) => { const d = await api(`/devices/${id}/regenerate-token`, { method: "POST" }); setTokenModal(d.token); load(); };
@@ -1420,99 +1382,6 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
             <option value="">Todos clientes</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-        )}
-      </div>
-
-      <div style={{ ...S.card, marginBottom: 24, padding: 18, background: "#0d1929", border: "1px solid rgba(59,158,255,0.08)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <div>
-            <div style={{ fontWeight: 800, color: "#fff", letterSpacing: 0.5 }}>🔎 Descobertos na rede local</div>
-            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Encontrados pelo agente (varredura + ONVIF WS-Discovery). Um clique para adicionar.</div>
-          </div>
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#b8cfe8", cursor: "pointer", fontWeight: 700 }}>
-              <input
-                type="checkbox"
-                style={{ accentColor: "#3b9eff", transform: "scale(1.1)" }}
-                checked={showAdoptedDiscovered}
-                onChange={(e) => setShowAdoptedDiscovered(e.target.checked)}
-              />
-              Mostrar adicionados
-            </label>
-            <button style={S.btnSm()} onClick={loadDiscovered} disabled={discLoading}>{discLoading ? "..." : "Atualizar"}</button>
-          </div>
-        </div>
-        {discErr && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 10 }}>⚠️ {discErr}</div>}
-        {discoveredVisible.length === 0 ? (
-          <div style={{ color: "#4a6080", fontSize: 12, padding: "10px 0" }}>
-            {discLoading ? "Carregando..." : "Nenhum equipamento descoberto nas últimas 24h."}
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ color: "#64748b", textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 9 }}>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Nome</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>IP</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Tipo</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Portas</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>MAC</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Último</th>
-                  <th style={{ textAlign: "right", padding: "10px 8px" }}>Ação</th>
-                </tr>
-              </thead>
-              <tbody>
-                {discoveredVisible.map((d) => {
-                  const ports = Array.isArray(d.open_ports) ? d.open_ports.join(", ") : "";
-                  const adopted = !!d.device_id;
-                  const hasOnvif = !!(d.onvif_xaddrs && String(d.onvif_xaddrs).trim());
-                  const nameVal = discNames[d.id] ?? "";
-                  return (
-                    <tr key={d.id} style={{ borderTop: "1px solid rgba(59,158,255,0.08)" }}>
-                      <td style={{ padding: "10px 8px", minWidth: 220 }}>
-                        <input
-                          style={{ ...S.input, height: 34, fontSize: 12 }}
-                          value={nameVal}
-                          onChange={(e) => setDiscNames((p) => ({ ...p, [d.id]: e.target.value }))}
-                          placeholder="Nome do dispositivo"
-                          disabled={adopted}
-                        />
-                      </td>
-                      <td style={{ padding: "10px 8px", color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>{d.ip_address || "—"}</td>
-                      <td style={{ padding: "10px 8px", color: "#cbd5e1", fontWeight: 700 }}>
-                        {d.guess_type || "other"} {hasOnvif ? <span style={{ ...S.badge("#3b9eff"), marginLeft: 8 }}>ONVIF</span> : null}
-                      </td>
-                      <td style={{ padding: "10px 8px", color: "#94a3b8", fontFamily: "monospace" }}>{ports || "—"}</td>
-                      <td style={{ padding: "10px 8px", color: "#94a3b8", fontFamily: "monospace" }}>{d.mac_address || "—"}</td>
-                      <td style={{ padding: "10px 8px", color: "#94a3b8" }}>{d.last_seen ? timeAgoPtBR(d.last_seen) : "—"}</td>
-                      <td style={{ padding: "10px 8px", textAlign: "right" }}>
-                        {adopted ? (
-                          <span style={S.badge("#22c55e")}>Adicionado</span>
-                        ) : (
-                          <button
-                            style={S.btnSm("primary")}
-                            onClick={async () => {
-                              const name = String((discNames[d.id] ?? "")).trim();
-                              if (!name) return;
-                              try {
-                                await api(`/discovered-devices/${d.id}/adopt`, { method: "POST", body: JSON.stringify({ name }) });
-                                load();
-                                loadDiscovered();
-                              } catch (e) {
-                                alert("Falha ao adicionar: " + (e?.error || e?.message || ""));
-                              }
-                            }}
-                          >
-                            + Adicionar
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
         )}
       </div>
 
@@ -1650,6 +1519,205 @@ function DevicesPage({ userRole, userClientId, canVideo }) {
             <button style={{ ...S.btn("primary"), width: "100%" }} onClick={() => { navigator.clipboard.writeText(tokenModal); setTokenModal(null); }}>📋 Copiar e Fechar</button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ScannerPage({ userRole, userClientId, canVideo }) {
+  const [devices, setDevices] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [modal, setModal] = useState(null);
+  const [discovered, setDiscovered] = useState([]);
+  const [showAdoptedDiscovered, setShowAdoptedDiscovered] = useState(false);
+  const [discErr, setDiscErr] = useState("");
+  const [discLoading, setDiscLoading] = useState(false);
+  const [discNames, setDiscNames] = useState({});
+  const isMobile = useIsMobile();
+
+  const load = useCallback(() => {
+    api("/devices").then((data) => {
+      setDevices(Array.isArray(data) ? data : []);
+    }).catch(() => {});
+    if (userRole === "superadmin") api("/clients").then(setClients).catch(() => {});
+  }, [userRole]);
+
+  useEffect(() => { 
+    load(); 
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t); 
+  }, [load]);
+
+  const loadDiscovered = useCallback(() => {
+    setDiscLoading(true);
+    setDiscErr("");
+    api("/discovered-devices")
+      .then((data) => setDiscovered(Array.isArray(data) ? data : []))
+      .catch((e) => setDiscErr(e?.error || e?.message || "Falha ao carregar descobertos"))
+      .finally(() => setDiscLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadDiscovered();
+    const t = setInterval(loadDiscovered, 15000);
+    return () => clearInterval(t);
+  }, [loadDiscovered]);
+
+  useEffect(() => {
+    setDiscNames((prev) => {
+      const next = { ...prev };
+      for (const d of discovered) {
+        if (next[d.id] != null) continue;
+        const ip = String(d.ip_address || "");
+        const defName = d.hostname || `${(d.guess_type || "device")}-${ip.replace(/\./g, "-")}`;
+        next[d.id] = defName;
+      }
+      return next;
+    });
+  }, [discovered]);
+
+  const existingIps = new Set(devices.map((d) => String(d.ip_address || "").trim()).filter(Boolean));
+  const discoveredVisible = showAdoptedDiscovered
+    ? discovered
+    : discovered.filter((d) => !d.device_id && !existingIps.has(String(d.ip_address || "").trim()));
+
+  const guessToDeviceType = (guess) => {
+    const g = String(guess || "").toLowerCase().trim();
+    if (g === "camera") return "camera";
+    if (g === "nvr") return "nvr";
+    if (g === "dvr") return "dvr";
+    if (g === "router") return "router";
+    if (g === "switch") return "switch";
+    if (g === "server") return "server";
+    return "other";
+  };
+
+  const openFinalize = (d) => {
+    const ip = String(d.ip_address || "").trim();
+    const portsArr = Array.isArray(d.open_ports) ? d.open_ports.map((p) => parseInt(p) || 0).filter(Boolean) : [];
+    const monitor_port = portsArr.includes(37777) ? 37777 : portsArr.includes(8000) ? 8000 : 0;
+    const name = String((discNames[d.id] ?? "")).trim();
+    setModal({
+      name,
+      ip_address: ip,
+      device_type: guessToDeviceType(d.guess_type),
+      monitor_port,
+      mac_address: d.mac_address || "",
+      serial_number: d.serial_number || "",
+      client_id: userRole === "superadmin" ? null : userClientId,
+    });
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+        <div>
+          <div style={S.pageTitle}>🔎 Scanner</div>
+          <div style={S.pageSub}>Equipamentos descobertos na rede local. Finalize o cadastro para virar Device.</div>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button style={S.btnSm()} onClick={loadDiscovered} disabled={discLoading}>{discLoading ? "..." : "Atualizar"}</button>
+        </div>
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 24, padding: 18, background: "#0d1929", border: "1px solid rgba(59,158,255,0.08)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontWeight: 800, color: "#fff", letterSpacing: 0.5 }}>🔎 Descobertos na rede local</div>
+            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Encontrados pelo agente (varredura + ONVIF WS-Discovery).</div>
+          </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#b8cfe8", cursor: "pointer", fontWeight: 700 }}>
+              <input
+                type="checkbox"
+                style={{ accentColor: "#3b9eff", transform: "scale(1.1)" }}
+                checked={showAdoptedDiscovered}
+                onChange={(e) => setShowAdoptedDiscovered(e.target.checked)}
+              />
+              Mostrar adicionados
+            </label>
+          </div>
+        </div>
+
+        {discErr && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 10 }}>⚠️ {discErr}</div>}
+        {discoveredVisible.length === 0 ? (
+          <div style={{ color: "#4a6080", fontSize: 12, padding: "10px 0" }}>
+            {discLoading ? "Carregando..." : "Nenhum equipamento descoberto nas últimas 24h."}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ color: "#64748b", textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 9 }}>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Nome</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>IP</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Tipo</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Portas</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>MAC</th>
+                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Último</th>
+                  <th style={{ textAlign: "right", padding: "10px 8px" }}>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {discoveredVisible.map((d) => {
+                  const ports = Array.isArray(d.open_ports) ? d.open_ports.join(", ") : "";
+                  const adopted = !!d.device_id || existingIps.has(String(d.ip_address || "").trim());
+                  const hasOnvif = !!(d.onvif_xaddrs && String(d.onvif_xaddrs).trim());
+                  const nameVal = discNames[d.id] ?? "";
+                  return (
+                    <tr key={d.id} style={{ borderTop: "1px solid rgba(59,158,255,0.08)" }}>
+                      <td style={{ padding: "10px 8px", minWidth: 220 }}>
+                        <input
+                          style={{ ...S.input, height: 34, fontSize: 12 }}
+                          value={nameVal}
+                          onChange={(e) => setDiscNames((p) => ({ ...p, [d.id]: e.target.value }))}
+                          placeholder="Nome do dispositivo"
+                          disabled={adopted}
+                        />
+                      </td>
+                      <td style={{ padding: "10px 8px", color: "#fff", fontFamily: "monospace", fontWeight: 700 }}>{d.ip_address || "—"}</td>
+                      <td style={{ padding: "10px 8px", color: "#cbd5e1", fontWeight: 700 }}>
+                        {d.guess_type || "other"} {hasOnvif ? <span style={{ ...S.badge("#3b9eff"), marginLeft: 8 }}>ONVIF</span> : null}
+                      </td>
+                      <td style={{ padding: "10px 8px", color: "#94a3b8", fontFamily: "monospace" }}>{ports || "—"}</td>
+                      <td style={{ padding: "10px 8px", color: "#94a3b8", fontFamily: "monospace" }}>{d.mac_address || "—"}</td>
+                      <td style={{ padding: "10px 8px", color: "#94a3b8" }}>{d.last_seen ? timeAgoPtBR(d.last_seen) : "—"}</td>
+                      <td style={{ padding: "10px 8px", textAlign: "right" }}>
+                        {adopted ? (
+                          <span style={S.badge("#22c55e")}>Adicionado</span>
+                        ) : (
+                          <button
+                            style={S.btnSm("primary")}
+                            onClick={() => openFinalize(d)}
+                            disabled={!String((discNames[d.id] ?? "")).trim()}
+                          >
+                            Finalizar cadastro
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {(modal && !modal.id) && (
+        <DeviceModal
+          device={modal}
+          clients={clients}
+          userRole={userRole}
+          userClientId={userClientId}
+          canVideo={!!canVideo}
+          onSave={() => {
+            load();
+            loadDiscovered();
+            setModal(null);
+          }}
+          onClose={() => setModal(null)}
+        />
       )}
     </div>
   );
@@ -2765,6 +2833,7 @@ function NexusApp() {
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "clients", label: "Clientes", icon: Users },
     { id: "devices", label: "Devices", icon: Server },
+    { id: "scanner", label: "Scanner", icon: RefreshCw },
     { id: "triggers", label: "Triggers", icon: Zap },
     { id: "alerts", label: "Alertas", icon: Bell },
     { id: "events", label: "Eventos", icon: ClipboardList },
@@ -2775,6 +2844,7 @@ function NexusApp() {
     { section: "MENU" },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "devices", label: "Devices", icon: Server },
+    { id: "scanner", label: "Scanner", icon: RefreshCw },
     { id: "alerts", label: "Alertas", icon: Bell },
     { id: "events", label: "Eventos", icon: ClipboardList },
     { id: "solar", label: "Solar", icon: Sun },
@@ -2786,6 +2856,7 @@ function NexusApp() {
     dashboard: <Dashboard userRole={userRole} />,
     clients:   <ClientsPage />,
     devices:   <DevicesPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
+    scanner:   <ScannerPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
     triggers:  <TriggersPage userRole={userRole} />,
     alerts:    <AlertsPage userRole={userRole} />,
     events:    <EventsPage userRole={userRole} />,
