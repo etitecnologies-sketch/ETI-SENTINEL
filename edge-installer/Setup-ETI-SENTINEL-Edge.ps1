@@ -125,7 +125,7 @@ dst = r'''$dst'''
 img = Image.open(src)
 img = img.convert('RGBA')
 sizes = [(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
-img.save(dst, format="ICO", sizes=sizes)
+img.save(dst, format='ICO', sizes=sizes)
 "@
     & $py -c $code | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar .ico (Pillow/arquivo fonte)." }
