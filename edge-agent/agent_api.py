@@ -674,12 +674,27 @@ class Handler(BaseHTTPRequestHandler):
             return
 
     def _json(self, code: int, obj: Any) -> None:
-        raw = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        try:
+            raw = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            try:
+                self.end_headers()
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            try:
+                self.wfile.write(raw)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception:
+            try:
+                _append_log(self.server.log_path, traceback.format_exc())
+            except Exception:
+                pass
+            return
 
     def _read_json(self) -> Dict[str, Any]:
         try:
