@@ -41,7 +41,15 @@ def _ping(ip: str, timeout_ms: int) -> bool:
             args = ["ping", "-n", "1", "-w", str(int(timeout_ms)), ip]
         else:
             args = ["ping", "-c", "1", "-W", str(max(1, int(timeout_ms / 1000))), ip]
-        p = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=max(2, int(timeout_ms / 1000) + 2))
+        kwargs = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "timeout": max(2, int(timeout_ms / 1000) + 2),
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        p = subprocess.run(args, **kwargs)
         return p.returncode == 0
     except Exception:
         return False
@@ -67,13 +75,26 @@ def _arp_mac(ip: str) -> str:
         return ""
     try:
         if os.name == "nt":
-            p = subprocess.run(["arp", "-a", ip], capture_output=True, text=True, timeout=2)
+            p = subprocess.run(
+                ["arp", "-a", ip],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                stdin=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
             txt = (p.stdout or "") + "\n" + (p.stderr or "")
             m = re.search(rf"\b{re.escape(ip)}\s+([0-9a-fA-F:-]{{11,17}})\b", txt)
             if m:
                 return m.group(1).replace("-", ":").lower()
             return ""
-        p = subprocess.run(["ip", "neigh", "show", ip], capture_output=True, text=True, timeout=2)
+        p = subprocess.run(
+            ["ip", "neigh", "show", ip],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            stdin=subprocess.DEVNULL,
+        )
         txt = (p.stdout or "") + "\n" + (p.stderr or "")
         m = re.search(r"lladdr\s+([0-9a-fA-F:]{17})", txt)
         if m:
