@@ -66,6 +66,7 @@ alert_cooldown_map  = {}
 ping_state          = {}
 last_summary_time   = 0
 last_event_id       = 0
+threshold_stability = {}
 
 DEVICE_TYPE_ICONS = {
     "server":"🖥️","camera":"📷","router":"🌐","switch":"🔀",
@@ -94,6 +95,33 @@ def get_severity_level(expr, value, threshold):
     if ratio>=1.5: return "CRÍTICO","🔴"
     elif ratio>=1.2: return "ALTO","🟠"
     else: return "ATENÇÃO","🟡"
+
+def threshold_margins(expr, threshold):
+    t = float(threshold) if threshold is not None else 0.0
+    if t < 0:
+        t = 0.0
+    confirm_fire = int(os.getenv("THRESHOLD_FIRE_CONFIRM", "2") or 2)
+    confirm_resolve = int(os.getenv("THRESHOLD_RESOLVE_CONFIRM", "2") or 2)
+    confirm_fire = max(1, confirm_fire)
+    confirm_resolve = max(1, confirm_resolve)
+
+    fire_pct = float(os.getenv("THRESHOLD_FIRE_MARGIN_PCT", "0.02") or 0.02)
+    resolve_pct = float(os.getenv("THRESHOLD_RESOLVE_MARGIN_PCT", "0.05") or 0.05)
+    fire_pct = max(0.0, fire_pct)
+    resolve_pct = max(0.0, resolve_pct)
+
+    if str(expr or "") == "latency_ms":
+        fire_abs = float(os.getenv("LATENCY_FIRE_MARGIN_MS", "20") or 20)
+        resolve_abs = float(os.getenv("LATENCY_RESOLVE_MARGIN_MS", "30") or 30)
+        fire_abs = max(0.0, fire_abs)
+        resolve_abs = max(0.0, resolve_abs)
+        fire_th = t + fire_abs
+        resolve_th = max(0.0, t - resolve_abs)
+        return fire_th, resolve_th, confirm_fire, confirm_resolve
+
+    fire_th = t * (1.0 + fire_pct)
+    resolve_th = t * (1.0 - resolve_pct)
+    return fire_th, resolve_th, confirm_fire, confirm_resolve
 
 @contextmanager
 def get_conn():
@@ -645,19 +673,37 @@ def evaluate_triggers(cur, conn):
             eff_client_id = device_client_id or trigger_client_id
             if value is None:
                 continue
-            if float(value)>float(threshold):
-                fire_alert(cur,conn,trigger_id,name,host,expr,value,threshold,device_id,eff_client_id)
+            k = (int(trigger_id or 0), int(device_id or 0), str(host or ""), str(expr or ""), int(eff_client_id or 0))
+            open_alert = open_by_key.get(k)
+            open_alert_id = open_alert[0] if open_alert else None
+            open_thr = open_alert[1] if open_alert else None
+
+            fire_th, resolve_th, confirm_fire, confirm_resolve = threshold_margins(expr, open_thr if open_thr is not None else threshold)
+            st = threshold_stability.get(k) or {"above": 0, "below": 0}
+
+            if float(value) >= float(fire_th):
+                st["above"] = int(st.get("above") or 0) + 1
             else:
-                k = (int(trigger_id or 0), int(device_id or 0), str(host or ""), str(expr or ""), int(eff_client_id or 0))
-                open_alert = open_by_key.get(k)
-                if not open_alert:
-                    continue
-                if is_in_cooldown(host, f"resolved:{expr}:{trigger_id}"):
-                    continue
-                alert_id, open_thr = open_alert[0], open_alert[1]
-                resolve_threshold_alert(cur, conn, alert_id, name, host, expr, value, open_thr, device_id, eff_client_id)
-                set_cooldown(host, f"resolved:{expr}:{trigger_id}")
-                open_by_key.pop(k, None)
+                st["above"] = 0
+
+            if float(value) <= float(resolve_th):
+                st["below"] = int(st.get("below") or 0) + 1
+            else:
+                st["below"] = 0
+
+            threshold_stability[k] = st
+
+            if not open_alert_id:
+                if st["above"] >= confirm_fire and not is_in_cooldown(host, f"threshold:{expr}:{trigger_id}:fire"):
+                    fire_alert(cur,conn,trigger_id,name,host,expr,value,threshold,device_id,eff_client_id)
+                    set_cooldown(host, f"threshold:{expr}:{trigger_id}:fire")
+                    st["above"] = 0
+            else:
+                if st["below"] >= confirm_resolve and not is_in_cooldown(host, f"resolved:{expr}:{trigger_id}"):
+                    resolve_threshold_alert(cur, conn, open_alert_id, name, host, expr, value, open_thr, device_id, eff_client_id)
+                    set_cooldown(host, f"resolved:{expr}:{trigger_id}")
+                    open_by_key.pop(k, None)
+                    st["below"] = 0
 
 def check_new_events(cur, conn):
     """Monitora a tabela de eventos (analíticos) e envia para o Telegram"""
