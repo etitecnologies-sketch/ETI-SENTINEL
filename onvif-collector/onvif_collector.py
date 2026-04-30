@@ -298,7 +298,8 @@ def _cfg_sig(d: Dict[str, Any]) -> str:
 
 
 def main() -> None:
-    load_dotenv()
+    here = os.path.dirname(__file__)
+    load_dotenv(os.path.join(here, ".env"), override=True)
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(asctime)s %(levelname)s %(message)s")
 
     cfg_path = os.getenv("ONVIF_CONFIG", os.path.join(os.path.dirname(__file__), "config.json"))

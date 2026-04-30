@@ -207,7 +207,7 @@ def run_check(here: Path, env: dict) -> int:
 
 def main() -> None:
     here = Path(__file__).resolve().parent
-    load_dotenv(here / ".env")
+    load_dotenv(here / ".env", override=True)
     env = os.environ.copy()
 
     if "--check" in sys.argv or "check" in sys.argv:

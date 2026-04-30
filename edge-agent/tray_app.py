@@ -55,7 +55,7 @@ def _load_icon_image(here: Path):
 
 def main() -> None:
     here = Path(__file__).resolve().parent
-    load_dotenv(here / ".env")
+    load_dotenv(here / ".env", override=True)
     env = os.environ.copy()
 
     try:
