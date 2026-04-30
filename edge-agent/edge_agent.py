@@ -272,8 +272,64 @@ def main() -> None:
                 old_cwd = os.getcwd()
                 try:
                     os.chdir(hls_dir)
+                    
+                    # Inicia MediaMTX se disponível (porta 8889 para WebRTC, 8888 para HLS)
+                    mtx_bin = here.parent / "bin" / "mediamtx.exe"
+                    if mtx_bin.exists():
+                        try:
+                            # Configuração mínima via env vars para o MediaMTX
+                            mtx_env = os.environ.copy()
+                            mtx_env["MTX_PATHS_ALL_SOURCE"] = "publisher"
+                            mtx_env["MTX_WEBRTC"] = "yes"
+                            mtx_env["MTX_HLS"] = "yes"
+                            subprocess.Popen([str(mtx_bin)], cwd=str(mtx_bin.parent), env=mtx_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            print("[INFO] MediaMTX (WebRTC/HLS) iniciado")
+                        except Exception as e:
+                            print(f"[ERROR] Falha ao iniciar MediaMTX: {e}")
+
                     httpd = HTTPServer(('0.0.0.0', 8000), CORSRequestHandler)
-                    print("[INFO] Servidor HLS ativo na porta 8000")
+                    print("[INFO] Servidor de API de Vídeo ativo na porta 8000")
+                    
+                    # Motor de Transmissão (FFmpeg -> MediaMTX)
+                    def start_streams():
+                        active_procs = {}
+                        while True:
+                            try:
+                                # Busca as configs de RTSP habilitadas
+                                url = f"{env.get('INGEST_API_URL')}/collector/rtsp-config"
+                                r = requests.get(url, headers={"x-collector-key": env.get("COLLECTOR_KEY")}, timeout=10)
+                                if r.ok:
+                                    configs = r.json()
+                                    current_ids = set()
+                                    for cfg in configs:
+                                        user = cfg.get("username")
+                                        pw = cfg.get("password")
+                                        dev_id = cfg.get("device_id")
+                                        for s in cfg.get("streams", []):
+                                            if not s.get("enabled"): continue
+                                            sid = f"{dev_id}_ch{s.get('channel')}"
+                                            current_ids.add(sid)
+                                            if sid not in active_procs:
+                                                rtsp = s.get("url").replace("{username}", user).replace("{password}", pw)
+                                                # Envia para o MediaMTX via RTSP (localhost:8554)
+                                                # O MediaMTX converterá automaticamente para WebRTC e HLS
+                                                cmd = [
+                                                    "ffmpeg", "-loglevel", "error", "-re", "-rtsp_transport", "tcp", "-i", rtsp,
+                                                    "-c", "copy", "-f", "rtsp", f"rtsp://localhost:8554/{sid}"
+                                                ]
+                                                active_procs[sid] = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                                print(f"[VIDEO] Publicando no MediaMTX: {sid}")
+                                    
+                                    # Mata streams removidos
+                                    for sid in list(active_procs.keys()):
+                                        if sid not in current_ids:
+                                            active_procs[sid].terminate()
+                                            del active_procs[sid]
+                            except Exception as e:
+                                print(f"[ERROR] Loop de vídeo: {e}")
+                            time.sleep(30)
+                    
+                    threading.Thread(target=start_streams, daemon=True).start()
                     httpd.serve_forever()
                 finally:
                     os.chdir(old_cwd)

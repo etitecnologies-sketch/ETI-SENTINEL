@@ -32,6 +32,33 @@ function Ensure-Python {
     if (!(Ensure-Command "python")) { throw "Falha ao instalar Python via winget." }
 }
 
+function Ensure-MediaMTX {
+    $mtxPath = Join-Path $installDir "bin\mediamtx.exe"
+    if (Test-Path $mtxPath) { return }
+
+    Write-Inf "Baixando MediaMTX (Media Server para WebRTC/HLS)..."
+    $url = "https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/mediamtx_v1.9.0_windows_amd64.zip"
+    $tmp = Join-Path $env:TEMP "mediamtx-install"
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $zip = Join-Path $tmp "mediamtx.zip"
+    
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        Expand-Archive -Path $zip -DestinationPath $tmp -Force
+        $bin = Join-Path $tmp "mediamtx.exe"
+        $yml = Join-Path $tmp "mediamtx.yml"
+        $destBin = Join-Path $installDir "bin"
+        New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+        if (Test-Path $bin) { Copy-Item $bin $destBin -Force }
+        if (Test-Path $yml) { Copy-Item $yml $destBin -Force }
+        Write-Ok "MediaMTX instalado em $destBin"
+    } catch {
+        Write-Wrn "Não foi possível baixar MediaMTX. O vídeo WebRTC pode falhar."
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Ensure-Ffmpeg {
     if (Ensure-Command "ffmpeg") { return }
     
@@ -243,6 +270,7 @@ Write-Inf "Instalação em: $installDir"
 
 Ensure-Python
 Ensure-Ffmpeg
+Ensure-MediaMTX
 
 $defaultIngest = "https://eti-sentinel-production.up.railway.app"
 $defaultKey = "etiSENTINEL_collector_2026_etitecnologies"

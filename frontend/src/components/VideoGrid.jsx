@@ -22,12 +22,14 @@ export default function VideoGrid() {
         if (device.enabled && device.streams) {
           device.streams.forEach(s => {
             if (s.enabled) {
+              const sid = `${device.id}_ch${s.channel}`;
               allStreams.push({
                 ...s,
                 deviceName: device.name,
-                // O vídeo é gerado pelo video-service local na porta 8888 ou 8000
-                // Vamos usar o IP local do Agente
-                hlsUrl: `http://localhost:8000/hls/${device.id}_ch${s.channel}.m3u8`
+                // Tentativa 1: WebRTC (MediaMTX porta 8889) - Baixíssima latência
+                // Tentativa 2: HLS (MediaMTX porta 8888) - Fallback
+                webrtcUrl: `http://localhost:8889/${sid}`,
+                hlsUrl: `http://localhost:8888/${sid}/index.m3u8`
               });
             }
           });
@@ -92,8 +94,9 @@ export default function VideoGrid() {
           {streams.map((stream, idx) => (
             <VideoPlayer 
               key={`${stream.deviceName}-${idx}`}
-              url={stream.hlsUrl}
+              url={stream.webrtcUrl || stream.hlsUrl}
               name={`${stream.deviceName} - ${stream.name}`}
+              isWebRTC={!!stream.webrtcUrl}
             />
           ))}
         </div>

@@ -3,10 +3,11 @@ import { useState, useEffect, useRef } from 'react';
 /**
  * Componente para exibição de vídeo RTSP via HLS
  * @param {Object} props
- * @param {string} props.url - URL do stream HLS (.m3u8)
+ * @param {string} props.url - URL do stream (WebRTC ou HLS)
  * @param {string} props.name - Nome da câmera
+ * @param {boolean} props.isWebRTC - Se é um stream WebRTC
  */
-export default function VideoPlayer({ url, name }) {
+export default function VideoPlayer({ url, name, isWebRTC }) {
   const videoRef = useRef(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -17,8 +18,15 @@ export default function VideoPlayer({ url, name }) {
     setLoading(true);
     setError(false);
 
-    // Se o navegador suportar HLS nativamente (Safari)
-    if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+    if (isWebRTC) {
+        // Para WebRTC, o MediaMTX fornece uma página/stream que pode ser carregada via iframe 
+        // ou via player especializado. Para simplificar e garantir funcionamento,
+        // vamos usar o iframe do próprio MediaMTX que já resolve o handshake WebRTC.
+        return;
+    }
+
+    // Fallback HLS
+    if (videoRef.current && videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
       videoRef.current.src = url;
     } 
     // Caso contrário, poderíamos usar hls.js (mas vamos assumir suporte ou fallback simples por enquanto)
@@ -30,18 +38,27 @@ export default function VideoPlayer({ url, name }) {
 
   return (
     <div className="relative bg-slate-900 rounded-lg overflow-hidden aspect-video border border-slate-800 group">
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        className="w-full h-full object-cover"
-        onCanPlay={() => setLoading(false)}
-        onError={() => {
-          setError(true);
-          setLoading(false);
-        }}
-      />
+      {isWebRTC ? (
+        <iframe
+          src={url}
+          className="w-full h-full border-none"
+          allow="autoplay; fullscreen"
+          onLoad={() => setLoading(false)}
+        />
+      ) : (
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className="w-full h-full object-cover"
+          onCanPlay={() => setLoading(false)}
+          onError={() => {
+            setError(true);
+            setLoading(false);
+          }}
+        />
+      )}
       
       {/* Overlay de Nome */}
       <div className="absolute top-0 left-0 right-0 p-2 bg-gradient-to-b from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
