@@ -716,6 +716,49 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = (self.path or "").split("?")[0]
             q = _parse_query(self.path or "")
+            if path == "/" or path == "":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                html = f"""
+                <!DOCTYPE html>
+                <html lang="pt-br">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>ETI SENTINEL - Agente Local</title>
+                    <style>
+                        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #070d18; color: #e2eaf5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
+                        .card {{ background: #0b1525; border: 1px solid rgba(59, 158, 255, 0.2); border-radius: 16px; padding: 40px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.5); max-width: 400px; width: 90%; }}
+                        h1 {{ color: #3b9eff; margin-bottom: 8px; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }}
+                        p {{ color: #64748b; font-size: 14px; margin-bottom: 30px; }}
+                        .status {{ display: inline-flex; align-items: center; gap: 8px; background: rgba(0, 201, 167, 0.1); color: #00c9a7; padding: 8px 16px; border-radius: 99px; font-weight: bold; font-size: 12px; margin-bottom: 20px; }}
+                        .dot {{ width: 8px; height: 8px; background: #00c9a7; border-radius: 50%; box-shadow: 0 0 10px #00c9a7; animation: pulse 2s infinite; }}
+                        @keyframes pulse {{ 0% {{ opacity: 0.4; }} 50% {{ opacity: 1; }} 100% {{ opacity: 0.4; }} }}
+                        .btn {{ display: block; background: #3b9eff; color: white; text-decoration: none; padding: 12px; border-radius: 8px; font-weight: bold; transition: all 0.2s; margin-top: 10px; }}
+                        .btn:hover {{ background: #1a7fff; transform: translateY(-2px); }}
+                        .info {{ margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 11px; color: #3a5c7a; text-align: left; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="card">
+                        <div class="status"><div class="dot"></div> AGENTE ATIVO</div>
+                        <h1>ETI SENTINEL</h1>
+                        <p>O serviço de borda está rodando corretamente neste computador.</p>
+                        
+                        <a href="/api/status" class="btn">Ver Status da API</a>
+                        
+                        <div class="info">
+                            <div><strong>ID do Cliente:</strong> {sanitize(self.server.env.get("CLIENT_ID") or "Não configurado")}</div>
+                            <div><strong>Servidor Cloud:</strong> {sanitize(self.server.env.get("INGEST_API_URL") or "Não configurado")}</div>
+                            <div style="margin-top:10px; opacity: 0.5;">Versão: 1.0.3-edge</div>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                self.end_headers()
+                self.wfile.write(html.encode("utf-8"))
+                return
             if path == "/health":
                 return self._json(200, {"ok": True})
             if path == "/api/status":
