@@ -152,6 +152,14 @@ def run_check(here: Path, env: dict) -> int:
     ffmpeg_ok = shutil.which("ffmpeg") is not None
     print(f"ffmpeg: {'OK' if ffmpeg_ok else 'NÃO ENCONTRADO'}")
 
+    # Check MediaMTX
+    mtx_paths = [
+        here.parent / "bin" / "mediamtx.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe"
+    ]
+    mtx_found = any(p.exists() for p in mtx_paths)
+    print(f"mediamtx: {'OK' if mtx_found else 'NÃO ENCONTRADO'}")
+
     if not ingest_api_url:
         print("ERRO: INGEST_API_URL não configurado")
         return 1
@@ -274,8 +282,17 @@ def main() -> None:
                     os.chdir(hls_dir)
                     
                     # Inicia MediaMTX se disponível (porta 8889 para WebRTC, 8888 para HLS)
-                    mtx_bin = here.parent / "bin" / "mediamtx.exe"
-                    if mtx_bin.exists():
+                    mtx_bin = None
+                    possible_mtx = [
+                        here.parent / "bin" / "mediamtx.exe",
+                        Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe"
+                    ]
+                    for p in possible_mtx:
+                        if p.exists():
+                            mtx_bin = p
+                            break
+                    
+                    if mtx_bin:
                         try:
                             # Configuração mínima via env vars para o MediaMTX
                             mtx_env = os.environ.copy()
@@ -283,9 +300,11 @@ def main() -> None:
                             mtx_env["MTX_WEBRTC"] = "yes"
                             mtx_env["MTX_HLS"] = "yes"
                             subprocess.Popen([str(mtx_bin)], cwd=str(mtx_bin.parent), env=mtx_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            print("[INFO] MediaMTX (WebRTC/HLS) iniciado")
+                            print(f"[INFO] MediaMTX (WebRTC/HLS) iniciado a partir de: {mtx_bin}")
                         except Exception as e:
                             print(f"[ERROR] Falha ao iniciar MediaMTX: {e}")
+                    else:
+                        print("[WARN] MediaMTX não encontrado. WebRTC/HLS não funcionarão.")
 
                     httpd = HTTPServer(('0.0.0.0', 8000), CORSRequestHandler)
                     print("[INFO] Servidor de API de Vídeo ativo na porta 8000")
