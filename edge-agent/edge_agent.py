@@ -107,6 +107,8 @@ def _sanitize_base_url(url: str) -> str:
     u = _sanitize(url)
     if not u:
         return u
+    # Remove backticks, quotes and other common copy-paste trash
+    u = u.replace("`", "").replace("'", "").replace("\"", "").strip()
     if not u.startswith("http://") and not u.startswith("https://"):
         u = "https://" + u
     return u.rstrip("/")
@@ -149,16 +151,30 @@ def run_check(here: Path, env: dict) -> int:
     print(f"COLLECTOR_KEY: {'OK' if collector_key else '(vazio)'}")
     print(f"CLIENT_ID: {client_id or '(vazio)'}")
 
-    ffmpeg_ok = shutil.which("ffmpeg") is not None
-    print(f"ffmpeg: {'OK' if ffmpeg_ok else 'NÃO ENCONTRADO'}")
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        # Tenta no diretório bin da instalação
+        p = here.parent / "bin" / "ffmpeg.exe"
+        if p.exists(): ffmpeg_path = str(p)
+    
+    print(f"ffmpeg: {'OK (' + ffmpeg_path + ')' if ffmpeg_path else 'NÃO ENCONTRADO'}")
 
     # Check MediaMTX
-    mtx_paths = [
+    mtx_bin = None
+    possible_mtx = [
         here.parent / "bin" / "mediamtx.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe"
+        Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe",
+        here / "mediamtx.exe"
     ]
-    mtx_found = any(p.exists() for p in mtx_paths)
-    print(f"mediamtx: {'OK' if mtx_found else 'NÃO ENCONTRADO'}")
+    for p in possible_mtx:
+        if p.exists():
+            mtx_bin = p
+            break
+    print(f"mediamtx: {'OK (' + str(mtx_bin) + ')' if mtx_bin else 'NÃO ENCONTRADO'}")
+
+    # Exporta os caminhos encontrados para serem usados no main()
+    os.environ["INTERNAL_FFMPEG_PATH"] = ffmpeg_path or "ffmpeg"
+    os.environ["INTERNAL_MEDIAMTX_PATH"] = str(mtx_bin) if mtx_bin else ""
 
     if not ingest_api_url:
         print("ERRO: INGEST_API_URL não configurado")
@@ -228,8 +244,14 @@ def main() -> None:
     load_dotenv(here / ".env", override=True)
     env = os.environ.copy()
 
+    # Executa o diagnóstico interno antes de subir os serviços para mapear os binários
+    run_check(here, env)
+    
+    ffmpeg_exe = os.environ.get("INTERNAL_FFMPEG_PATH", "ffmpeg")
+    mtx_exe = os.environ.get("INTERNAL_MEDIAMTX_PATH", "")
+
     if "--check" in sys.argv or "check" in sys.argv:
-        raise SystemExit(run_check(here, env))
+        return
 
     repo_root = here.parent
     python = sys.executable
@@ -282,25 +304,15 @@ def main() -> None:
                     os.chdir(hls_dir)
                     
                     # Inicia MediaMTX se disponível (porta 8889 para WebRTC, 8888 para HLS)
-                    mtx_bin = None
-                    possible_mtx = [
-                        here.parent / "bin" / "mediamtx.exe",
-                        Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe"
-                    ]
-                    for p in possible_mtx:
-                        if p.exists():
-                            mtx_bin = p
-                            break
-                    
-                    if mtx_bin:
+                    if mtx_exe:
                         try:
                             # Configuração mínima via env vars para o MediaMTX
                             mtx_env = os.environ.copy()
                             mtx_env["MTX_PATHS_ALL_SOURCE"] = "publisher"
                             mtx_env["MTX_WEBRTC"] = "yes"
                             mtx_env["MTX_HLS"] = "yes"
-                            subprocess.Popen([str(mtx_bin)], cwd=str(mtx_bin.parent), env=mtx_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            print(f"[INFO] MediaMTX (WebRTC/HLS) iniciado a partir de: {mtx_bin}")
+                            subprocess.Popen([mtx_exe], cwd=str(Path(mtx_exe).parent), env=mtx_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            print(f"[INFO] MediaMTX (WebRTC/HLS) iniciado a partir de: {mtx_exe}")
                         except Exception as e:
                             print(f"[ERROR] Falha ao iniciar MediaMTX: {e}")
                     else:
@@ -333,7 +345,7 @@ def main() -> None:
                                                 # Envia para o MediaMTX via RTSP (localhost:8554)
                                                 # O MediaMTX converterá automaticamente para WebRTC e HLS
                                                 cmd = [
-                                                    "ffmpeg", "-loglevel", "error", "-re", "-rtsp_transport", "tcp", "-i", rtsp,
+                                                    ffmpeg_exe, "-loglevel", "error", "-re", "-rtsp_transport", "tcp", "-i", rtsp,
                                                     "-c", "copy", "-f", "rtsp", f"rtsp://localhost:8554/{sid}"
                                                 ]
                                                 active_procs[sid] = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
