@@ -1,5 +1,11 @@
 $ErrorActionPreference = "Stop"
 
+try {
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [Console]::OutputEncoding = $utf8
+    $OutputEncoding = $utf8
+} catch {}
+
 function Write-Ok([string]$m) { Write-Host "[OK]  $m" -ForegroundColor Green }
 function Write-Inf([string]$m) { Write-Host "[INFO] $m" -ForegroundColor Cyan }
 function Write-Wrn([string]$m) { Write-Host "[WARN] $m" -ForegroundColor Yellow }
@@ -146,13 +152,17 @@ Write-Inf "Instalação em: $installDir"
 Ensure-Python
 Ensure-Ffmpeg
 
-$ingest = (Read-Host "INGEST_API_URL (ex: https://eti-sentinel-production.up.railway.app)").Trim()
-if (!$ingest) { throw "INGEST_API_URL é obrigatório." }
+$defaultIngest = "https://eti-sentinel-production.up.railway.app"
+$defaultKey = "etiSENTINEL_collector_2026_etitecnologies"
+
+$ingest = (Read-Host "INGEST_API_URL (Enter = $defaultIngest)").Trim()
+if (!$ingest) { $ingest = $defaultIngest }
 $ingest = $ingest.Trim('`').Trim('"').Trim("'").Trim()
 if (!($ingest.StartsWith("http://") -or $ingest.StartsWith("https://"))) { $ingest = "https://$ingest" }
 $ingest = $ingest.TrimEnd("/")
 
-$key = (Read-Host "COLLECTOR_KEY").Trim()
+$key = (Read-Host "COLLECTOR_KEY (Enter = default)").Trim()
+if (!$key) { $key = $defaultKey }
 $key = $key.Trim('`').Trim('"').Trim("'").Trim()
 if (!$key) { throw "COLLECTOR_KEY é obrigatório." }
 
