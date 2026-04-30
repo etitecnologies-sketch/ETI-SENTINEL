@@ -41,6 +41,17 @@ function Ensure-Ffmpeg {
 }
 
 function Download-Repo([string]$destDir) {
+    try { Stop-ScheduledTask -TaskName "ETI_SENTINEL_EDGE" -ErrorAction SilentlyContinue } catch {}
+    try {
+        Get-ScheduledTask -TaskName "ETI_SENTINEL_*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Stop-ScheduledTask -TaskName $_.TaskName -ErrorAction SilentlyContinue }
+    } catch {}
+    try {
+        Get-CimInstance Win32_Process |
+            Where-Object { $_.CommandLine -and ($_.CommandLine -like "*\\ETI-SENTINEL\\*") } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+
     $tmp = Join-Path $env:TEMP ("eti-sentinel-main-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     $zip = Join-Path $tmp "main.zip"
@@ -51,7 +62,20 @@ function Download-Repo([string]$destDir) {
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     $src = Get-ChildItem -Path $tmp -Directory | Where-Object { $_.Name -like "ETI-SENTINEL-*" } | Select-Object -First 1
     if (!$src) { throw "Não foi possível localizar pasta extraída do repositório." }
-    if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force }
+    if (Test-Path $destDir) {
+        try {
+            Remove-Item $destDir -Recurse -Force -ErrorAction Stop
+        } catch {
+            try {
+                Start-Sleep -Seconds 2
+                Remove-Item $destDir -Recurse -Force -ErrorAction Stop
+            } catch {
+                $old = ($destDir.TrimEnd("\") + ".old." + (Get-Date -Format "yyyyMMdd_HHmmss"))
+                Write-Wrn "Pasta em uso. Renomeando para: $old"
+                try { Rename-Item -Path $destDir -NewName $old -Force } catch {}
+            }
+        }
+    }
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     Copy-Item (Join-Path $src.FullName "*") $destDir -Recurse -Force
     Remove-Item $tmp -Recurse -Force
