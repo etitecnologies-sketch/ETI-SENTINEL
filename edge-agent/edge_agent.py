@@ -27,7 +27,17 @@ def _proc_name(args):
 
 
 def _spawn(args, env):
-    return subprocess.Popen(args, env=env, cwd=str(Path(args[-1]).resolve().parent))
+    kwargs = {"env": env, "cwd": str(Path(args[-1]).resolve().parent)}
+    if os.name == "nt":
+        creationflags = 0
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            creationflags |= subprocess.CREATE_NO_WINDOW
+        creationflags |= 0x00000008
+        kwargs["creationflags"] = creationflags
+        kwargs["stdin"] = subprocess.DEVNULL
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.DEVNULL
+    return subprocess.Popen(args, **kwargs)
 
 
 def _kill_stale_processes(match: str) -> None:
