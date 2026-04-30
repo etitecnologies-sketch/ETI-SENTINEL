@@ -25,8 +25,9 @@ export default function VideoGrid() {
               allStreams.push({
                 ...s,
                 deviceName: device.name,
-                // A URL HLS seria gerada pelo video-service
-                hlsUrl: `/hls/${device.id}_ch${s.channel}.m3u8`
+                // O vídeo é gerado pelo video-service local na porta 8888 ou 8000
+                // Vamos usar o IP local do Agente
+                hlsUrl: `http://localhost:8000/hls/${device.id}_ch${s.channel}.m3u8`
               });
             }
           });
