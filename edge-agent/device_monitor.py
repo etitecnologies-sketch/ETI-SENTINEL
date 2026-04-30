@@ -56,7 +56,15 @@ def _ping(host: str, timeout_ms: int) -> Tuple[bool, float]:
             args = ["ping", "-n", "1", "-w", str(int(timeout_ms)), host]
         else:
             args = ["ping", "-c", "1", "-W", str(max(1, int(timeout_ms / 1000))), host]
-        p = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=max(2, int(timeout_ms / 1000) + 2))
+        kwargs = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "timeout": max(2, int(timeout_ms / 1000) + 2),
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        p = subprocess.run(args, **kwargs)
         latency_ms = (time.time() - t0) * 1000.0
         return p.returncode == 0, float(round(latency_ms, 1))
     except Exception:
