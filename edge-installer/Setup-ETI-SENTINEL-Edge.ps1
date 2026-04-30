@@ -93,7 +93,7 @@ function Ensure-Shortcuts([string]$installDir) {
     $lnk1.TargetPath = $pythonw
     $lnk1.Arguments = "`"$entry`""
     $lnk1.WorkingDirectory = $edgeDir
-    $lnk1.Description = "ETI SENTINEL — Edge Agent"
+    $lnk1.Description = "ETI SENTINEL - Edge Agent"
     if (Test-Path $icon) { $lnk1.IconLocation = "$icon,0" }
     $lnk1.Save()
 
@@ -101,7 +101,7 @@ function Ensure-Shortcuts([string]$installDir) {
     $lnk2.TargetPath = $pythonw
     $lnk2.Arguments = "`"$entry`""
     $lnk2.WorkingDirectory = $edgeDir
-    $lnk2.Description = "ETI SENTINEL — Edge Agent"
+    $lnk2.Description = "ETI SENTINEL - Edge Agent"
     if (Test-Path $icon) { $lnk2.IconLocation = "$icon,0" }
     $lnk2.Save()
 
@@ -109,7 +109,7 @@ function Ensure-Shortcuts([string]$installDir) {
     $un.TargetPath = "powershell.exe"
     $un.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$installDir\edge-installer\Uninstall-ETI-SENTINEL-Edge.ps1`""
     $un.WorkingDirectory = $installDir
-    $un.Description = "Desinstalar ETI SENTINEL — Edge Agent"
+    $un.Description = "Desinstalar ETI SENTINEL - Edge Agent"
     if (Test-Path $icon) { $un.IconLocation = "$icon,0" }
     $un.Save()
 }
@@ -148,16 +148,16 @@ Ensure-Ffmpeg
 
 $ingest = (Read-Host "INGEST_API_URL (ex: https://eti-sentinel-production.up.railway.app)").Trim()
 if (!$ingest) { throw "INGEST_API_URL é obrigatório." }
-$ingest = $ingest.Trim("`").Trim('"').Trim("'").Trim()
+$ingest = $ingest.Trim('`').Trim('"').Trim("'").Trim()
 if (!($ingest.StartsWith("http://") -or $ingest.StartsWith("https://"))) { $ingest = "https://$ingest" }
 $ingest = $ingest.TrimEnd("/")
 
 $key = (Read-Host "COLLECTOR_KEY").Trim()
-$key = $key.Trim("`").Trim('"').Trim("'").Trim()
+$key = $key.Trim('`').Trim('"').Trim("'").Trim()
 if (!$key) { throw "COLLECTOR_KEY é obrigatório." }
 
 $cid = (Read-Host "CLIENT_ID (opcional)").Trim()
-$cid = $cid.Trim("`").Trim('"').Trim("'").Trim()
+$cid = $cid.Trim('`').Trim('"').Trim("'").Trim()
 
 Download-Repo $installDir
 $edgeDir = Join-Path $installDir "edge-agent"
