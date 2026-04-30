@@ -12,28 +12,25 @@ export default function VideoGrid() {
 
   const load = useCallback(async () => {
     try {
-      // Busca configurações de RTSP que estão habilitadas
-      // Em um cenário real, isso viria da ingest-api
-      const response = await fetch('/api/collector/rtsp-config');
+      setLoading(true);
+      const apiBase = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${apiBase}/collector/rtsp-config`);
       const data = await response.json();
-      
+
       const allStreams = [];
       data.forEach(device => {
-        if (device.enabled && device.streams) {
-          device.streams.forEach(s => {
-            if (s.enabled) {
-              const sid = `${device.id}_ch${s.channel}`;
-              allStreams.push({
-                ...s,
-                deviceName: device.name,
-                // Tentativa 1: WebRTC (MediaMTX porta 8889) - Baixíssima latência
-                // Tentativa 2: HLS (MediaMTX porta 8888) - Fallback
-                webrtcUrl: `http://localhost:8889/${sid}`,
-                hlsUrl: `http://localhost:8888/${sid}/index.m3u8`
-              });
-            }
-          });
-        }
+        const streams = device.streams || [];
+        streams.forEach(s => {
+          if (s.enabled) {
+            const sid = `${device.device_id}_ch${s.channel}`;
+            allStreams.push({
+              ...s,
+              deviceName: device.name,
+              webrtcUrl: `http://localhost:8889/${sid}`,
+              hlsUrl: `http://localhost:8888/${sid}/index.m3u8`
+            });
+          }
+        });
       });
       setStreams(allStreams);
     } catch (e) {
