@@ -225,6 +225,15 @@ def main() -> None:
 
     repo_root = here.parent
     python = sys.executable
+    if os.name == "nt":
+        try:
+            p = str(python or "")
+            if p.lower().endswith("\\python.exe"):
+                pw = p[:-len("\\python.exe")] + "\\pythonw.exe"
+                if Path(pw).exists():
+                    python = pw
+        except Exception:
+            pass
 
     enable_device = _bool(env.get("ENABLE_DEVICE_MONITOR", "1"))
     enable_rtsp = _bool(env.get("ENABLE_RTSP_MONITOR", "1"))
