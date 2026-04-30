@@ -105,7 +105,9 @@ function Ensure-Venv([string]$edgeDir) {
     }
     Write-Inf "Instalando dependências do Edge..."
     & $py -m pip install --upgrade pip | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar/atualizar pip na venv." }
     & $py -m pip install -r (Join-Path $edgeDir "requirements.txt") | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge." }
 }
 
 function Ensure-Icon([string]$installDir) {
@@ -126,35 +128,49 @@ sizes = [(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
 img.save(dst, format="ICO", sizes=sizes)
 "@
     & $py -c $code | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar .ico (Pillow/arquivo fonte)." }
+    if (!(Test-Path $dst)) { throw "Falha ao gerar ícone: $dst" }
 }
 
 function Ensure-Shortcuts([string]$installDir) {
     $edgeDir = Join-Path $installDir "edge-agent"
     $pythonw = Join-Path $edgeDir ".venv\Scripts\pythonw.exe"
-    $entry = Join-Path $edgeDir "edge_agent.py"
     $icon = Join-Path $edgeDir "ETI_SENTINEL.ico"
+    $tray = Join-Path $edgeDir "tray_app.py"
+    $localUrl = "http://127.0.0.1:8808"
     $desktop = [Environment]::GetFolderPath("Desktop")
     $programs = [Environment]::GetFolderPath("Programs")
     $folder = Join-Path $programs "ETI SENTINEL"
     New-Item -ItemType Directory -Force -Path $folder | Out-Null
 
+    if (!(Test-Path $icon)) { Ensure-Icon $installDir }
     $shell = New-Object -ComObject WScript.Shell
     $lnk1 = $shell.CreateShortcut((Join-Path $desktop "ETI SENTINEL.lnk"))
-    $lnk1.TargetPath = $pythonw
-    $lnk1.Arguments = "`"$entry`""
-    $lnk1.WorkingDirectory = $edgeDir
-    $lnk1.Description = "ETI SENTINEL - Edge Agent"
+    $lnk1 = $shell.CreateShortcut((Join-Path $desktop "ETI SENTINEL.lnk"))
+    $lnk1.TargetPath = "explorer.exe"
+    $lnk1.Arguments = $localUrl
+    $lnk1.WorkingDirectory = $installDir
+    $lnk1.Description = "ETI SENTINEL - Abrir Painel Local"
     if (Test-Path $icon) { $lnk1.IconLocation = "$icon,0" }
     $lnk1.Save()
-
     $lnk2 = $shell.CreateShortcut((Join-Path $folder "ETI SENTINEL.lnk"))
-    $lnk2.TargetPath = $pythonw
-    $lnk2.Arguments = "`"$entry`""
-    $lnk2.WorkingDirectory = $edgeDir
-    $lnk2.Description = "ETI SENTINEL - Edge Agent"
+    $lnk2 = $shell.CreateShortcut((Join-Path $folder "ETI SENTINEL.lnk"))
+    $lnk2.TargetPath = "explorer.exe"
+    $lnk2.Arguments = $localUrl
+    $lnk2.WorkingDirectory = $installDir
+    $lnk2.Description = "ETI SENTINEL - Abrir Painel Local"
     if (Test-Path $icon) { $lnk2.IconLocation = "$icon,0" }
     $lnk2.Save()
 
+    if ((Test-Path $pythonw) -and (Test-Path $tray)) {
+        $lnk3 = $shell.CreateShortcut((Join-Path $folder "ETI SENTINEL (Tray).lnk"))
+        $lnk3.TargetPath = $pythonw
+        $lnk3.Arguments = "`"$tray`""
+        $lnk3.WorkingDirectory = $edgeDir
+        $lnk3.Description = "ETI SENTINEL - Ícone na bandeja"
+        if (Test-Path $icon) { $lnk3.IconLocation = "$icon,0" }
+        $lnk3.Save()
+    }
     $un = $shell.CreateShortcut((Join-Path $folder "Desinstalar ETI SENTINEL.lnk"))
     $un.TargetPath = "powershell.exe"
     $un.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$installDir\edge-installer\Uninstall-ETI-SENTINEL-Edge.ps1`""
@@ -163,6 +179,7 @@ function Ensure-Shortcuts([string]$installDir) {
     if (Test-Path $icon) { $un.IconLocation = "$icon,0" }
     $un.Save()
 }
+
 
 function Ensure-Task([string]$installDir) {
     $edgeDir = Join-Path $installDir "edge-agent"
