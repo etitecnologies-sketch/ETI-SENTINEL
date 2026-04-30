@@ -34,10 +34,41 @@ function Ensure-Python {
 
 function Ensure-Ffmpeg {
     if (Ensure-Command "ffmpeg") { return }
-    if (!(Ensure-Command "winget")) { Write-Wrn "ffmpeg não encontrado e winget não disponível."; return }
-    Write-Inf "Instalando ffmpeg via winget..."
-    & winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements | Out-Null
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    
+    # Tenta via winget primeiro (método oficial e mais limpo)
+    if (Ensure-Command "winget") {
+        Write-Inf "Instalando ffmpeg via winget..."
+        try {
+            & winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements --silent | Out-Null
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            if (Ensure-Command "ffmpeg") { Write-Ok "ffmpeg instalado com sucesso."; return }
+        } catch {}
+    }
+
+    # Backup: Download direto se winget falhar ou não existir
+    Write-Inf "Baixando ffmpeg portátil..."
+    $ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+    $ffmpegTmp = Join-Path $env:TEMP "ffmpeg-install"
+    $ffmpegZip = Join-Path $ffmpegTmp "ffmpeg.zip"
+    New-Item -ItemType Directory -Force -Path $ffmpegTmp | Out-Null
+    
+    try {
+        Invoke-WebRequest -Uri $ffmpegUrl -OutFile $ffmpegZip -UseBasicParsing
+        Expand-Archive -Path $ffmpegZip -DestinationPath $ffmpegTmp -Force
+        $binFolder = Get-ChildItem -Path $ffmpegTmp -Directory -Recurse | Where-Object { $_.Name -eq "bin" } | Select-Object -First 1
+        if ($binFolder) {
+            $destBin = Join-Path $installDir "bin"
+            New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+            Copy-Item (Join-Path $binFolder.FullName "*") $destBin -Force
+            # Adiciona ao PATH da sessão atual
+            $env:Path += ";$destBin"
+            Write-Ok "ffmpeg portátil instalado em $destBin"
+        }
+    } catch {
+        Write-Wrn "Não foi possível instalar ffmpeg automaticamente. As câmeras podem não funcionar."
+    } finally {
+        Remove-Item $ffmpegTmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Download-Repo([string]$destDir) {
