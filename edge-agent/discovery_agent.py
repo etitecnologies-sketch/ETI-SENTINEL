@@ -278,7 +278,7 @@ def _infer_client_id(ingest_api_url: str, collector_key: str) -> Optional[int]:
 
 def main() -> None:
     here = os.path.dirname(os.path.abspath(__file__))
-    load_dotenv(os.path.join(here, ".env"))
+    load_dotenv(os.path.join(here, ".env"), override=True)
 
     ingest_api_url = _sanitize_base_url(os.getenv("INGEST_API_URL") or "http://localhost:3000")
     collector_key = _sanitize(os.getenv("COLLECTOR_KEY") or "")

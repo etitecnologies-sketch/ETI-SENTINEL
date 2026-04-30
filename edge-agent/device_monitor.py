@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -106,7 +107,8 @@ def _check_one(dev: Dict[str, Any], ingest_api_url: str) -> Tuple[int, str, bool
 
 
 def main() -> None:
-    load_dotenv()
+    here = Path(__file__).resolve().parent
+    load_dotenv(here / ".env", override=True)
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(asctime)s %(levelname)s %(message)s")
 
     ingest_api_url = _sanitize_base_url(os.getenv("INGEST_API_URL") or "http://localhost:3000")
