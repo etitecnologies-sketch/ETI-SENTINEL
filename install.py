@@ -52,11 +52,23 @@ def run_command(cmd, cwd=None, description=None):
     try:
         if description:
             print_info(description)
-        
+
+        kwargs = {"cwd": cwd, "capture_output": True, "text": True}
+        if os.name == "nt":
+            kwargs["stdin"] = subprocess.DEVNULL
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                kwargs["startupinfo"] = si
+            except Exception:
+                pass
+
         if isinstance(cmd, str):
-            result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+            result = subprocess.run(cmd, shell=True, **kwargs)
         else:
-            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+            result = subprocess.run(cmd, **kwargs)
         
         if result.returncode != 0:
             print_error(f"Erro ao executar: {' '.join(cmd) if isinstance(cmd, list) else cmd}")

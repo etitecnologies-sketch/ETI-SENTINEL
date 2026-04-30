@@ -14,7 +14,17 @@ def print_header():
 
 def install_deps():
     print("Instalando dependencias...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "requests", "psutil", "-q"])
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+            kwargs["startupinfo"] = si
+        except Exception:
+            pass
+    subprocess.run([sys.executable, "-m", "pip", "install", "requests", "psutil", "-q"], **kwargs)
     print("Dependencias instaladas!")
     print()
 
@@ -33,7 +43,17 @@ def create_agent(cliente, token, url):
         "        param = '-n' if os.name == 'nt' else '-c'\n"
         "        command = ['ping', param, '1', '-w', '3000', ip]\n"
         "        start = time.time()\n"
-        "        result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "        kwargs = {'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL, 'stdin': subprocess.DEVNULL}\n"
+        "        if os.name == 'nt':\n"
+        "            kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)\n"
+        "            try:\n"
+        "                si = subprocess.STARTUPINFO()\n"
+        "                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW\n"
+        "                si.wShowWindow = getattr(subprocess, 'SW_HIDE', 0)\n"
+        "                kwargs['startupinfo'] = si\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "        result = subprocess.run(command, **kwargs)\n"
         "        latency = round((time.time() - start) * 1000, 2)\n"
         "        return result.returncode == 0, latency\n"
         "    except:\n"
@@ -113,10 +133,20 @@ def create_task(cliente, agent_path):
         "/ru", "SYSTEM",
         "/f"
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    kwargs = {"capture_output": True, "text": True}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+            kwargs["startupinfo"] = si
+        except Exception:
+            pass
+    result = subprocess.run(cmd, **kwargs)
     if result.returncode == 0:
         print(f"Tarefa criada: {task_name}")
-        subprocess.run(["schtasks", "/run", "/tn", task_name])
+        subprocess.run(["schtasks", "/run", "/tn", task_name], **{k: v for k, v in kwargs.items() if k in {"creationflags", "startupinfo"}})
         print("Agente iniciado em segundo plano!")
         return True
     else:

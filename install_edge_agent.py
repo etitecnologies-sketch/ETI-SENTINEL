@@ -7,7 +7,18 @@ from pathlib import Path
 
 
 def _run(cmd, cwd=None, check=True):
-    return subprocess.run(cmd, cwd=cwd, check=check)
+    kwargs = {"cwd": cwd, "check": check}
+    if os.name == "nt":
+        kwargs["stdin"] = subprocess.DEVNULL
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+            kwargs["startupinfo"] = si
+        except Exception:
+            pass
+    return subprocess.run(cmd, **kwargs)
 
 
 def _which(cmd: str) -> bool:
