@@ -11,7 +11,16 @@ import {
   RefreshCw,
   LogOut,
   Menu,
+  Camera,
+  Activity,
+  LayoutGrid,
 } from 'lucide-react';
+import VideoPlayer from './components/VideoPlayer';
+import VideoGrid from './components/VideoGrid';
+import SolarDashboard from './components/SolarDashboard';
+import HealthDashboard from './components/HealthDashboard';
+import MetricCard from './components/MetricCard';
+import MetricChart from './components/MetricChart';
 
 // Error Boundary para evitar tela branca total
 class ErrorBoundary extends Component {
@@ -2794,6 +2803,33 @@ function NexusApp() {
   const [userAccessLevel, setUserAccessLevel] = useState(1);
   const [page, setPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toasts, setToasts] = useState([]);
+
+  const addToast = useCallback((title, message, type = "info") => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, title, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
+  }, []);
+
+  useEffect(() => {
+    const raw = import.meta.env.VITE_WS_URL || "";
+    const wsUrl = raw.replace(/["'`\s]/g, "").trim().replace(/\/$/, "");
+    if (!wsUrl || !authed) return;
+
+    const socket = io(wsUrl, {
+      transports: ["websocket", "polling"],
+    });
+
+    socket.on("alert", (a) => {
+      addToast("🚨 NOVO ALERTA", `${a.host}: ${a.trigger_name || a.expression}`, "danger");
+    });
+
+    socket.on("event", (e) => {
+      addToast("🎬 EVENTO", `${e.device_name}: ${e.event_type}`, "info");
+    });
+
+    return () => socket.close();
+  }, [authed, addToast]);
 
   useEffect(() => {
     if (authed) {
@@ -2833,21 +2869,25 @@ function NexusApp() {
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "clients", label: "Clientes", icon: Users },
     { id: "devices", label: "Devices", icon: Server },
+    { id: "cameras", label: "Câmeras", icon: Camera },
     { id: "scanner", label: "Scanner", icon: RefreshCw },
     { id: "triggers", label: "Triggers", icon: Zap },
     { id: "alerts", label: "Alertas", icon: Bell },
     { id: "events", label: "Eventos", icon: ClipboardList },
     { id: "solar", label: "Solar", icon: Sun },
+    { id: "health", label: "Saúde", icon: Activity },
   ];
 
   const NAV_CLIENT = [
     { section: "MENU" },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "devices", label: "Devices", icon: Server },
+    { id: "cameras", label: "Câmeras", icon: Camera },
     { id: "scanner", label: "Scanner", icon: RefreshCw },
     { id: "alerts", label: "Alertas", icon: Bell },
     { id: "events", label: "Eventos", icon: ClipboardList },
     { id: "solar", label: "Solar", icon: Sun },
+    { id: "health", label: "Saúde", icon: Activity },
   ];
 
   const NAV = isSuperAdmin ? NAV_SUPERADMIN : NAV_CLIENT;
@@ -2856,11 +2896,13 @@ function NexusApp() {
     dashboard: <Dashboard userRole={userRole} />,
     clients:   <ClientsPage />,
     devices:   <DevicesPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
+    cameras:   <VideoGrid />,
     scanner:   <ScannerPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
     triggers:  <TriggersPage userRole={userRole} />,
     alerts:    <AlertsPage userRole={userRole} />,
     events:    <EventsPage userRole={userRole} />,
     solar: <SolarPage userRole={userRole} />,
+    health: <HealthDashboard />,
   };
 
   const sidebarStyle = {
@@ -2975,6 +3017,32 @@ function NexusApp() {
         )}
         {PAGES[page] || PAGES.dashboard}
       </div>
+
+      {/* Toasts Container */}
+      <div style={{ position: "fixed", bottom: 20, right: 20, display: "flex", flexDirection: "column", gap: 10, zIndex: 2000 }}>
+        {toasts.map((t) => (
+          <div key={t.id} style={{
+            background: t.type === "danger" ? "#ef4444" : "#3b9eff",
+            color: "#fff",
+            padding: "12px 20px",
+            borderRadius: 12,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+            display: "flex",
+            flexDirection: "column",
+            minWidth: 260,
+            animation: "toast-in 0.3s ease-out"
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, opacity: 0.8, marginBottom: 2 }}>{t.title}</div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{t.message}</div>
+          </div>
+        ))}
+      </div>
+      <style>{`
+        @keyframes toast-in {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
