@@ -256,7 +256,7 @@ def main() -> None:
         # Inicia servidor HLS simples para servir os fragmentos de vídeo
         try:
             from http.server import SimpleHTTPRequestHandler, HTTPServer
-            import os
+            import threading
 
             class CORSRequestHandler(SimpleHTTPRequestHandler):
                 def end_headers(self):
@@ -268,12 +268,16 @@ def main() -> None:
             def run_hls_server():
                 hls_dir = here / "hls"
                 os.makedirs(hls_dir, exist_ok=True)
-                os.chdir(hls_dir)
-                httpd = HTTPServer(('0.0.0.0', 8000), CORSRequestHandler)
-                print("[INFO] Servidor HLS ativo na porta 8000")
-                httpd.serve_forever()
+                # Salva o diretório atual para voltar depois
+                old_cwd = os.getcwd()
+                try:
+                    os.chdir(hls_dir)
+                    httpd = HTTPServer(('0.0.0.0', 8000), CORSRequestHandler)
+                    print("[INFO] Servidor HLS ativo na porta 8000")
+                    httpd.serve_forever()
+                finally:
+                    os.chdir(old_cwd)
 
-            import threading
             threading.Thread(target=run_hls_server, daemon=True).start()
         except Exception as e:
             print(f"[ERROR] Falha ao iniciar servidor HLS: {e}")
