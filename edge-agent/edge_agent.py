@@ -253,6 +253,31 @@ def main() -> None:
     if enable_device:
         specs.append([python, str(here / "device_monitor.py")])
     if enable_rtsp:
+        # Inicia servidor HLS simples para servir os fragmentos de vídeo
+        try:
+            from http.server import SimpleHTTPRequestHandler, HTTPServer
+            import os
+
+            class CORSRequestHandler(SimpleHTTPRequestHandler):
+                def end_headers(self):
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET')
+                    self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
+                    return super().end_headers()
+
+            def run_hls_server():
+                hls_dir = here / "hls"
+                os.makedirs(hls_dir, exist_ok=True)
+                os.chdir(hls_dir)
+                httpd = HTTPServer(('0.0.0.0', 8000), CORSRequestHandler)
+                print("[INFO] Servidor HLS ativo na porta 8000")
+                httpd.serve_forever()
+
+            import threading
+            threading.Thread(target=run_hls_server, daemon=True).start()
+        except Exception as e:
+            print(f"[ERROR] Falha ao iniciar servidor HLS: {e}")
+
         specs.append([python, str(repo_root / "rtsp-monitor" / "rtsp_monitor.py")])
     if enable_onvif:
         env.setdefault("ONVIF_REMOTE", "1")
