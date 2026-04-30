@@ -49,6 +49,13 @@ def _ping(ip: str, timeout_ms: int) -> bool:
         }
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                kwargs["startupinfo"] = si
+            except Exception:
+                pass
         p = subprocess.run(args, **kwargs)
         return p.returncode == 0
     except Exception:

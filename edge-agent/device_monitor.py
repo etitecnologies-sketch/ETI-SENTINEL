@@ -64,6 +64,13 @@ def _ping(host: str, timeout_ms: int) -> Tuple[bool, float]:
         }
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                kwargs["startupinfo"] = si
+            except Exception:
+                pass
         p = subprocess.run(args, **kwargs)
         latency_ms = (time.time() - t0) * 1000.0
         return p.returncode == 0, float(round(latency_ms, 1))

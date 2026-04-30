@@ -74,7 +74,17 @@ def _probe_stream(url: str, transport: str, timeout_seconds: int) -> Tuple[bool,
     ]
 
     try:
-        p = subprocess.run(args, capture_output=True, text=True, timeout=max(3, timeout_seconds + 3))
+        kwargs: Dict[str, Any] = {"capture_output": True, "text": True, "timeout": max(3, timeout_seconds + 3), "stdin": subprocess.DEVNULL}
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                kwargs["startupinfo"] = si
+            except Exception:
+                pass
+        p = subprocess.run(args, **kwargs)
         if p.returncode == 0:
             return True, ""
         err = (p.stderr or p.stdout or "").strip()

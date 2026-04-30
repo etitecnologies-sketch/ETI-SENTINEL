@@ -39,6 +39,13 @@ def ping_device(ip):
         kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "stdin": subprocess.DEVNULL}
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                kwargs["startupinfo"] = si
+            except Exception:
+                pass
         result = subprocess.run(command, **kwargs)
         latency = round((time.time() - start) * 1000, 2)
         return result.returncode == 0, latency

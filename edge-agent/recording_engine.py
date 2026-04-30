@@ -71,7 +71,17 @@ def _spawn_record(rtsp_url: str, transport: str, out_pattern: str, log_path: Pat
         out_pattern,
     ]
     with log_path.open("a", encoding="utf-8") as lf:
-        return subprocess.Popen(args, stdout=lf, stderr=lf)
+        kwargs = {"stdout": lf, "stderr": lf, "stdin": subprocess.DEVNULL}
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                kwargs["startupinfo"] = si
+            except Exception:
+                pass
+        return subprocess.Popen(args, **kwargs)
 
 
 def main() -> None:
