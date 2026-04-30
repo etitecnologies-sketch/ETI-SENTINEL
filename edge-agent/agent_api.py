@@ -851,7 +851,7 @@ def main() -> None:
     import argparse
 
     here = Path(__file__).resolve().parent
-    load_dotenv(here / ".env", override=True)
+    load_dotenv(here / ".env")
     env = os.environ.copy()
 
     parser = argparse.ArgumentParser(add_help=True)

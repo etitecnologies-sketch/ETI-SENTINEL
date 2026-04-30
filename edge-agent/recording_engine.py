@@ -76,7 +76,7 @@ def _spawn_record(rtsp_url: str, transport: str, out_pattern: str, log_path: Pat
 
 def main() -> None:
     here = Path(__file__).resolve().parent
-    load_dotenv(here / ".env", override=True)
+    load_dotenv(here / ".env")
     env = os.environ.copy()
 
     if not _bool(env.get("ENABLE_RECORDING") or "0"):

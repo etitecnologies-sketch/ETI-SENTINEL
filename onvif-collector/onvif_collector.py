@@ -166,6 +166,9 @@ def _run_device(
     channel_map = cfg.get("channel_map") or {}
 
     last_state: Dict[Tuple[str, int], Optional[bool]] = {}
+    last_err: str = ""
+    last_err_ts: float = 0.0
+    backoff: float = float(max(1, reconnect_seconds))
 
     while True:
         if stop_event and stop_event.is_set():
@@ -175,19 +178,39 @@ def _run_device(
 
             cam = ONVIFCamera(host, port, username, password)
             events = cam.create_events_service()
-            sub = events.CreatePullPointSubscription()
+            sub = None
+            last_sub_exc: Optional[Exception] = None
+            for term in (None, "PT10M", "PT30M"):
+                if stop_event and stop_event.is_set():
+                    return
+                try:
+                    if term is None:
+                        sub = events.CreatePullPointSubscription()
+                    else:
+                        sub = events.CreatePullPointSubscription(InitialTerminationTime=term)
+                    break
+                except Exception as e:
+                    last_sub_exc = e
+                    sub = None
+                    time.sleep(0.4)
+            if sub is None:
+                raise RuntimeError(f"Subscribe Creation Failed: {last_sub_exc}")
             addr = _deep_get(sub, ("SubscriptionReference", "Address", "_value_1")) or _deep_get(
                 sub, ("SubscriptionReference", "Address")
             )
             if not addr:
                 raise RuntimeError("SubscriptionReference.Address não retornou um endereço válido")
 
-            pullpoint = cam.pullpoint.zeep_client.create_service(
+            zeep_client = getattr(events, "zeep_client", None) or getattr(events, "_client", None)
+            if zeep_client is None:
+                raise RuntimeError("Events zeep_client não disponível")
+            pullpoint = zeep_client.create_service(
                 "{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding",
                 str(addr),
             )
 
             logging.info("[%s] ONVIF conectado. Escutando eventos...", name)
+            backoff = float(max(1, reconnect_seconds))
             while True:
                 if stop_event and stop_event.is_set():
                     return
@@ -216,8 +239,14 @@ def _run_device(
                     except Exception as e:
                         logging.warning("[%s] Falha ao processar evento: %s", name, e)
         except Exception as e:
-            logging.error("[%s] ONVIF desconectado/erro: %s", name, e)
-            time.sleep(max(1, reconnect_seconds))
+            err = str(e)
+            now = time.time()
+            if err != last_err or (now - last_err_ts) > 60:
+                logging.error("[%s] ONVIF desconectado/erro: %s", name, e)
+                last_err = err
+                last_err_ts = now
+            time.sleep(backoff)
+            backoff = min(backoff * 2.0, 120.0)
 
 
 def _load_config(path: str) -> Dict[str, Any]:
