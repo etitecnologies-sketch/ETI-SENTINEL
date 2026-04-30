@@ -84,6 +84,26 @@ function Ensure-Venv([string]$edgeDir) {
     & $py -m pip install -r (Join-Path $edgeDir "requirements.txt") | Out-Null
 }
 
+function Ensure-Icon([string]$installDir) {
+    $edgeDir = Join-Path $installDir "edge-agent"
+    $py = Join-Path $edgeDir ".venv\Scripts\python.exe"
+    $src = Join-Path $installDir "imag\ETI SENTINEL-logo.jpg"
+    $dst = Join-Path $edgeDir "ETI_SENTINEL.ico"
+    if (!(Test-Path $py)) { return }
+    if (!(Test-Path $src)) { return }
+    Write-Inf "Gerando ícone do ETI SENTINEL..."
+    $code = @"
+from PIL import Image
+src = r'''$src'''
+dst = r'''$dst'''
+img = Image.open(src)
+img = img.convert("RGBA")
+sizes = [(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
+img.save(dst, format="ICO", sizes=sizes)
+"@
+    & $py -c $code | Out-Null
+}
+
 function Ensure-Shortcuts([string]$installDir) {
     $edgeDir = Join-Path $installDir "edge-agent"
     $pythonw = Join-Path $edgeDir ".venv\Scripts\pythonw.exe"
@@ -174,6 +194,7 @@ $edgeDir = Join-Path $installDir "edge-agent"
 Ensure-Env $edgeDir $ingest $key $cid
 Ensure-Venv $edgeDir
 Ensure-Task $installDir
+Ensure-Icon $installDir
 Ensure-Shortcuts $installDir
 
 Write-Ok "Instalado. Edge iniciado e configurado para iniciar com o Windows."
