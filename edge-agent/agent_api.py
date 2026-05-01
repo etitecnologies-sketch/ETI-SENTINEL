@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import threading
@@ -14,7 +15,7 @@ from dotenv import load_dotenv
 from camera_collector import _sanitize as sanitize
 from camera_collector import discover_cameras
 from edge_alert_format import format_telegram_alert
-from edge_notify import send_telegram, send_whatsapp_twilio
+from edge_notify import send_telegram, send_telegram_photo, send_whatsapp_twilio
 from edge_rules import RuleEngine, build_message
 
 
@@ -281,6 +282,20 @@ class PushRelay:
                 actions = rule.get("actions") or []
                 base_msg = build_message(rule_row, matched)
                 msg = format_telegram_alert(base_msg, matched, devs, cfg.get("client_name") or "")
+                snap_bytes = None
+                try:
+                    for e in matched or []:
+                        b64 = e.get("snapshot_jpg_b64") if isinstance(e, dict) else None
+                        if isinstance(b64, str) and b64:
+                            try:
+                                raw = b64.encode("ascii", errors="ignore")
+                                snap_bytes = base64.b64decode(raw)
+                                if snap_bytes:
+                                    break
+                            except Exception:
+                                snap_bytes = None
+                except Exception:
+                    snap_bytes = None
                 for a in actions:
                     if not isinstance(a, dict):
                         continue
@@ -296,12 +311,23 @@ class PushRelay:
                         if ctok and ccid:
                             dedupe.add("tg:" + ccid)
                         log_enabled = _bool(self.env.get("EDGE_NOTIFY_LOG") or "0")
-                        ok_client = send_telegram(msg, ctok, ccid, log=log_enabled)
+                        ok_client = False
+                        if snap_bytes:
+                            ok_client = send_telegram_photo(msg, ctok, ccid, snap_bytes, log=log_enabled)
+                            if not ok_client:
+                                ok_client = send_telegram(msg, ctok, ccid, log=log_enabled)
+                        else:
+                            ok_client = send_telegram(msg, ctok, ccid, log=log_enabled)
                         gt = gcfg.get("telegram_token") or ""
                         gc = gcfg.get("telegram_chat_id") or ""
                         ok_global = None
                         if gt and gc and ("tg:" + gc) not in dedupe:
-                            ok_global = send_telegram(msg, gt, gc, log=log_enabled)
+                            if snap_bytes:
+                                ok_global = send_telegram_photo(msg, gt, gc, snap_bytes, log=log_enabled)
+                                if not ok_global:
+                                    ok_global = send_telegram(msg, gt, gc, log=log_enabled)
+                            else:
+                                ok_global = send_telegram(msg, gt, gc, log=log_enabled)
                         if log_enabled:
                             print(
                                 f"[Edge Notify] tg client={_mask(ccid)} ok={ok_client} | global={_mask(gc)} ok={ok_global}"

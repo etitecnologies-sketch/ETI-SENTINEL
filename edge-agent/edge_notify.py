@@ -36,6 +36,36 @@ def send_telegram(message: str, token: str, chat_id: str, timeout: float = 8.0, 
         return False
 
 
+def send_telegram_photo(
+    caption: str,
+    token: str,
+    chat_id: str,
+    photo_bytes: bytes,
+    timeout: float = 12.0,
+    log: bool = False,
+) -> bool:
+    tok = _sanitize(token)
+    cid = _sanitize(chat_id)
+    if not tok or not cid:
+        return False
+    if not isinstance(photo_bytes, (bytes, bytearray)) or len(photo_bytes) == 0:
+        return False
+    clean = tok[3:] if tok.lower().startswith("bot") else tok
+    url = f"https://api.telegram.org/bot{clean}/sendPhoto"
+    data: Dict[str, Any] = {"chat_id": cid, "caption": str(caption or "")[:1024]}
+    try:
+        files = {"photo": ("snapshot.jpg", photo_bytes, "image/jpeg")}
+        r = requests.post(url, data=data, files=files, timeout=timeout)
+        ok = r.status_code == 200
+        if log and not ok:
+            print(f"[Edge Notify] telegram(photo) failed status={r.status_code} chat={_mask(cid)}")
+        return ok
+    except Exception as e:
+        if log:
+            print(f"[Edge Notify] telegram(photo) exception: {str(e)}")
+        return False
+
+
 def send_whatsapp_twilio(
     message: str,
     account_sid: str,
@@ -81,4 +111,3 @@ def send_whatsapp_twilio(
         if log:
             print(f"[Edge Notify] whatsapp(twilio) exception: {str(e)}")
         return False
-

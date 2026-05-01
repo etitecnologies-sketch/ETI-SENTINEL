@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import time
@@ -124,7 +125,59 @@ class AIWorker:
         except Exception:
             pass
 
-    def _push_event(self, token: str, device_id: int, channel: int, event_type: str, severity: str, description: str) -> bool:
+    def _encode_snapshot_b64(self, frame: Any) -> str:
+        if not _bool(os.getenv("AI_SEND_SNAPSHOT") or "0"):
+            return ""
+        cv2 = self._cv2
+        if cv2 is None or frame is None:
+            return ""
+        try:
+            max_w = int(os.getenv("AI_SNAPSHOT_MAX_WIDTH") or 640)
+        except Exception:
+            max_w = 640
+        try:
+            q0 = int(os.getenv("AI_SNAPSHOT_JPEG_QUALITY") or 75)
+        except Exception:
+            q0 = 75
+        try:
+            max_bytes = int(os.getenv("AI_SNAPSHOT_MAX_BYTES") or 400000)
+        except Exception:
+            max_bytes = 400000
+
+        try:
+            h, w = frame.shape[:2]
+            if max_w > 0 and w > max_w:
+                scale = float(max_w) / float(w)
+                nh = max(1, int(h * scale))
+                frame = cv2.resize(frame, (int(max_w), nh))
+        except Exception:
+            pass
+
+        for q in [q0, 60, 45]:
+            try:
+                ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(q)])
+                if not ok:
+                    continue
+                b = buf.tobytes()
+                if not b:
+                    continue
+                if max_bytes > 0 and len(b) > max_bytes:
+                    continue
+                return base64.b64encode(b).decode("ascii")
+            except Exception:
+                continue
+        return ""
+
+    def _push_event(
+        self,
+        token: str,
+        device_id: int,
+        channel: int,
+        event_type: str,
+        severity: str,
+        description: str,
+        snapshot_jpg_b64: str = "",
+    ) -> bool:
         url = _sanitize(os.getenv("EDGE_PUSH_URL") or "http://127.0.0.1:8808/api/push")
         if not url:
             return False
@@ -137,6 +190,8 @@ class AIWorker:
         }
         if description:
             payload["description"] = _sanitize(description)[:400]
+        if snapshot_jpg_b64:
+            payload["snapshot_jpg_b64"] = snapshot_jpg_b64
         try:
             r = self._sess.post(url, json=payload, headers={"x-event-source": "ai"}, timeout=(3, 8))
             return r.status_code == 200
@@ -269,7 +324,8 @@ class AIWorker:
                                 ev_type = self._class_to_event(cls_name)
                                 sev = self._severity_for(cls_name)
                                 desc = f"{cls_name} conf={conf:.2f} stream={stream_key}"
-                                ok_push = self._push_event(token, did, ch, ev_type, sev, desc)
+                                snap = self._encode_snapshot_b64(frame)
+                                ok_push = self._push_event(token, did, ch, ev_type, sev, desc, snapshot_jpg_b64=snap)
                                 any_fired = any_fired or ok_push
                         except Exception:
                             any_fired = False
@@ -292,4 +348,3 @@ class AIWorker:
         for k in list(self._caps.keys()):
             self._release_cap(k)
         logger.info("[AI] Stopped")
-
