@@ -138,6 +138,10 @@ class PushRelay:
             "source": sanitize(source or payload.get("source") or "edge"),
         }
         try:
+            try:
+                snap_max = int(self.env.get("EDGE_SNAPSHOT_B64_MAX_LEN") or 800000)
+            except Exception:
+                snap_max = 800000
             for k, v in (payload or {}).items():
                 kk = sanitize(k)
                 if not kk:
@@ -151,6 +155,8 @@ class PushRelay:
                     ev[kk] = v
                 elif isinstance(v, str) and len(v) <= 200:
                     ev[kk] = sanitize(v)
+                elif lk == "snapshot_jpg_b64" and isinstance(v, str) and 0 < len(v) <= max(1000, snap_max):
+                    ev["snapshot_jpg_b64"] = v.strip()
         except Exception:
             pass
 
@@ -603,10 +609,12 @@ class PushRelay:
         url = self._ingest_url()
         if not url:
             return False
+        safe_payload = dict(payload or {})
+        safe_payload.pop("snapshot_jpg_b64", None)
         try:
             r = self._sess.post(
                 url + "/push",
-                json=payload,
+                json=safe_payload,
                 headers={"x-event-source": sanitize(source or "edge")},
                 timeout=(5, 12),
             )
@@ -616,7 +624,7 @@ class PushRelay:
                     self._last_push_ok = time.time()
             return ok
         except Exception:
-            self._enqueue(payload, source)
+            self._enqueue(safe_payload, source)
             return False
 
     def _loop_flush(self) -> None:
