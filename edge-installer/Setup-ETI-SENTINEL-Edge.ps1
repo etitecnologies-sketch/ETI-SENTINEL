@@ -1,11 +1,11 @@
-$ErrorActionPreference = "Stop"
-
 param(
     [string]$Ingest,
     [string]$CollectorKey,
     [string]$ClientId,
     [switch]$Update
 )
+
+$ErrorActionPreference = "Stop"
 
 try {
     $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -213,10 +213,16 @@ function Ensure-Venv([string]$edgeDir) {
         Write-Inf "Criando ambiente virtual..."
         & python -m venv $venv | Out-Null
     }
+    try {
+        $installDir = Split-Path -Parent $edgeDir
+        $cacheDir = Join-Path $installDir ".pip-cache"
+        New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+        $env:PIP_CACHE_DIR = $cacheDir
+    } catch {}
     Write-Inf "Instalando dependências do Edge..."
-    & $py -m pip install --upgrade pip | Out-Null
+    & $py -m pip install --upgrade pip --no-cache-dir | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar/atualizar pip na venv." }
-    & $py -m pip install -r (Join-Path $edgeDir "requirements.txt") | Out-Null
+    & $py -m pip install --no-cache-dir -r (Join-Path $edgeDir "requirements.txt") | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge." }
 }
 
