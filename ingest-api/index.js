@@ -120,7 +120,7 @@ app.use((req, res, next) => {
 
 app.get("/", (req, res) => {
   if (hasFrontend) return res.sendFile(frontendIndex);
-  return res.json({ status: "online", service: "ETI SENTINEL API", version: "1.0.3" });
+  return res.json({ status: "online", service: "ETI SENTINEL API", version: "1.0.4" });
 });
 app.get("/health", async (req, res) => {
   try {
@@ -1303,6 +1303,116 @@ app.get("/collector/automation-rules", async (req, res) => {
   } catch (e) {
     console.error("/collector/automation-rules error:", e.message);
     res.status(500).json({ error: "Failed to fetch rules", detail: e.message });
+  }
+});
+
+app.post("/collector/automation-rules", async (req, res) => {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
+  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const cid =
+      (req.body?.client_id ? parseInt(req.body.client_id) : null) ||
+      (req.query.client_id ? parseInt(req.query.client_id) : null);
+    if (!cid) return res.status(400).json({ error: "client_id required" });
+
+    const name = sanitize(req.body?.name || "");
+    if (!name) return res.status(400).json({ error: "name required" });
+
+    const enabled = typeof req.body?.enabled === "boolean" ? req.body.enabled === true : true;
+
+    const rawRule = req.body?.rule;
+    if (!rawRule || typeof rawRule !== "object" || Array.isArray(rawRule)) {
+      return res.status(400).json({ error: "rule must be an object" });
+    }
+
+    const withinSeconds = Number.isFinite(Number(rawRule.within_seconds)) ? Number(rawRule.within_seconds) : 10;
+    if (!Number.isFinite(withinSeconds) || withinSeconds < 1 || withinSeconds > 86400) {
+      return res.status(400).json({ error: "rule.within_seconds invalid" });
+    }
+
+    const cooldownSecondsRaw =
+      rawRule.cooldown_seconds === undefined || rawRule.cooldown_seconds === null ? null : Number(rawRule.cooldown_seconds);
+    if (cooldownSecondsRaw !== null) {
+      if (!Number.isFinite(cooldownSecondsRaw) || cooldownSecondsRaw < 1 || cooldownSecondsRaw > 86400) {
+        return res.status(400).json({ error: "rule.cooldown_seconds invalid" });
+      }
+    }
+
+    const ifAll = Array.isArray(rawRule.if_all) ? rawRule.if_all : [];
+    if (ifAll.length === 0) return res.status(400).json({ error: "rule.if_all required" });
+    const ifAllNorm = [];
+    for (const c of ifAll) {
+      if (!c || typeof c !== "object" || Array.isArray(c)) return res.status(400).json({ error: "rule.if_all invalid" });
+      const cond = {};
+      if (c.event_type !== undefined) cond.event_type = sanitize(c.event_type || "");
+      if (c.device_id !== undefined) cond.device_id = parseInt(c.device_id);
+      if (c.channel !== undefined) cond.channel = parseInt(c.channel);
+      if (c.severity !== undefined) cond.severity = sanitize(c.severity || "");
+      if (c.source !== undefined) cond.source = sanitize(c.source || "");
+      if (cond.event_type !== undefined && !cond.event_type) return res.status(400).json({ error: "rule.if_all.event_type invalid" });
+      if (cond.device_id !== undefined && !(Number.isFinite(cond.device_id) && cond.device_id > 0)) {
+        return res.status(400).json({ error: "rule.if_all.device_id invalid" });
+      }
+      if (cond.channel !== undefined && !(Number.isFinite(cond.channel) && cond.channel >= 0)) {
+        return res.status(400).json({ error: "rule.if_all.channel invalid" });
+      }
+      if (cond.severity !== undefined && !cond.severity) return res.status(400).json({ error: "rule.if_all.severity invalid" });
+      if (cond.source !== undefined && !cond.source) return res.status(400).json({ error: "rule.if_all.source invalid" });
+      ifAllNorm.push(cond);
+    }
+
+    const actions = Array.isArray(rawRule.actions) ? rawRule.actions : [];
+    if (actions.length === 0) return res.status(400).json({ error: "rule.actions required" });
+    const actionsNorm = [];
+    for (const a of actions) {
+      if (!a || typeof a !== "object" || Array.isArray(a)) return res.status(400).json({ error: "rule.actions invalid" });
+      const type = sanitize(a.type || "");
+      if (type !== "notify") return res.status(400).json({ error: "rule.actions.type unsupported" });
+      let channels = Array.isArray(a.channels) ? a.channels : a.channels ? [a.channels] : ["telegram", "whatsapp"];
+      channels = channels.map((x) => sanitize(x)).filter((x) => x);
+      if (channels.length === 0) channels = ["telegram"];
+      actionsNorm.push({ type: "notify", channels });
+    }
+
+    const message = rawRule.message !== undefined && rawRule.message !== null ? String(rawRule.message) : "";
+    if (message && message.length > 400) return res.status(400).json({ error: "rule.message too long" });
+
+    const rule = {
+      within_seconds: withinSeconds,
+      if_all: ifAllNorm,
+      actions: actionsNorm,
+    };
+    if (cooldownSecondsRaw !== null) rule.cooldown_seconds = cooldownSecondsRaw;
+    if (message) rule.message = message;
+
+    const existing = await pool.query("SELECT id FROM automation_rules WHERE client_id=$1 AND name=$2 ORDER BY id ASC LIMIT 1", [
+      cid,
+      name,
+    ]);
+    if (existing.rows.length > 0) {
+      const id = existing.rows[0].id;
+      await pool.query("UPDATE automation_rules SET enabled=$1, rule=$2::jsonb, updated_at=NOW() WHERE id=$3", [
+        enabled,
+        JSON.stringify(rule),
+        id,
+      ]);
+      return res.json({ ok: true, id, updated: true });
+    }
+
+    const ins = await pool.query(
+      `
+      INSERT INTO automation_rules (name, enabled, client_id, rule, created_at, updated_at)
+      VALUES ($1,$2,$3,$4::jsonb,NOW(),NOW())
+      RETURNING id
+      `,
+      [name, enabled, cid, JSON.stringify(rule)]
+    );
+    res.json({ ok: true, id: ins.rows[0].id, created: true });
+  } catch (e) {
+    console.error("/collector/automation-rules POST error:", e.message);
+    res.status(500).json({ error: "Failed to upsert rule", detail: e.message });
   }
 });
 

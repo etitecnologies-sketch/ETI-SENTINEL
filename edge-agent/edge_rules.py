@@ -57,6 +57,7 @@ class RuleEngine:
             rid = _as_int(r.get("id")) or 0
             rule = r.get("rule") or {}
             within = float(rule.get("within_seconds") or 10)
+            cooldown = float(rule.get("cooldown_seconds") or within)
             if_all = rule.get("if_all") or []
             actions = rule.get("actions") or []
             if not isinstance(if_all, list) or not if_all:
@@ -65,7 +66,7 @@ class RuleEngine:
                 continue
 
             last = float(self._last_fire.get(rid) or 0)
-            if now - last < max(1.0, within):
+            if now - last < max(1.0, cooldown):
                 continue
 
             matched: List[Dict[str, Any]] = []
