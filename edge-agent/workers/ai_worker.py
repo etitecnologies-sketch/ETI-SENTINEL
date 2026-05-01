@@ -365,6 +365,19 @@ class AIWorker:
                             elif (now2 - last_dbg) >= max(1.0, dbg_every):
                                 self._last_debug_ts[stream_key] = now2
                                 logger.info(f"[AI] {stream_key} analyzed (det_total={det_total} pass={det_pass} conf_th={conf_th})")
+                            try:
+                                if (now2 - last_dbg) >= max(1.0, dbg_every):
+                                    self._push_event(
+                                        "x",
+                                        did,
+                                        ch,
+                                        "ai_debug",
+                                        "info",
+                                        f"stream={stream_key} det_total={det_total} pass={det_pass} conf_th={conf_th}",
+                                        snapshot_jpg_b64="",
+                                    )
+                            except Exception:
+                                pass
 
                     except Exception:
                         if debug:
