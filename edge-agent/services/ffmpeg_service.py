@@ -7,6 +7,36 @@ from pathlib import Path
 
 
 def find_ffmpeg():
+    env_path = (os.getenv("INTERNAL_FFMPEG_PATH") or "").strip().strip('"').strip("'")
+    if env_path:
+        try:
+            p = Path(env_path)
+            if p.exists():
+                return str(p)
+        except Exception:
+            pass
+        try:
+            w = shutil.which(env_path)
+            if w:
+                return w
+        except Exception:
+            pass
+
+    env_path2 = (os.getenv("FFMPEG_PATH") or "").strip().strip('"').strip("'")
+    if env_path2:
+        try:
+            p2 = Path(env_path2)
+            if p2.exists():
+                return str(p2)
+        except Exception:
+            pass
+        try:
+            w2 = shutil.which(env_path2)
+            if w2:
+                return w2
+        except Exception:
+            pass
+
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path:
         return ffmpeg_path
@@ -43,6 +73,13 @@ def wait_for_mediamtx(host="localhost", port=8554, timeout=15):
 def start_ffmpeg(rtsp_url, stream_key, ffmpeg_path=None, transcode: bool = False):
     if ffmpeg_path is None:
         ffmpeg_path = find_ffmpeg()
+
+    if ffmpeg_path == "ffmpeg":
+        try:
+            if not shutil.which("ffmpeg"):
+                raise FileNotFoundError("ffmpeg_not_found")
+        except Exception as e:
+            raise FileNotFoundError("ffmpeg_not_found") from e
 
     if not wait_for_mediamtx():
         raise Exception("MediaMTX not ready at localhost:8554")
