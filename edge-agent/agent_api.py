@@ -91,10 +91,17 @@ class PushRelay:
         self._engine = RuleEngine()
         self._stop = False
         self._sess = requests.Session()
+        self._event_last_ts: Dict[tuple, float] = {}
+        self._videoloss_started_ts: Dict[tuple, float] = {}
+        self._events_total = 0
+        self._notify_suppressed_total = 0
+        self._last_event_ts = 0.0
+        self._stream_state: Dict[tuple, Dict[str, Any]] = {}
 
     def start(self) -> None:
         threading.Thread(target=self._loop_refresh, daemon=True).start()
         threading.Thread(target=self._loop_flush, daemon=True).start()
+        threading.Thread(target=self._loop_state, daemon=True).start()
 
     def stop(self) -> None:
         self._stop = True
@@ -111,6 +118,9 @@ class PushRelay:
                 "last_push_ok": self._last_push_ok,
                 "queue_size": q,
                 "rules_count": len(self._rules or []),
+                "events_total": int(self._events_total),
+                "notify_suppressed_total": int(self._notify_suppressed_total),
+                "last_event_ts": float(self._last_event_ts),
             }
 
     def rules_summary(self) -> Any:
@@ -142,6 +152,119 @@ class PushRelay:
                     ev[kk] = sanitize(v)
         except Exception:
             pass
+
+        now_evt = time.time()
+        with self._lock:
+            self._events_total += 1
+            self._last_event_ts = now_evt
+
+        suppress_notify = False
+        et = sanitize(ev.get("event_type") or "")
+        did = ev.get("device_id")
+        ch = int(ev.get("channel") or 0)
+        suppress_list = set()
+        try:
+            raw = sanitize(self.env.get("EDGE_SUPPRESS_EVENT_TYPES") or "")
+            if raw:
+                suppress_list = {sanitize(x).strip() for x in raw.split(",") if sanitize(x).strip()}
+        except Exception:
+            suppress_list = set()
+        if et and et in suppress_list:
+            suppress_notify = True
+
+        state_key = None
+        if isinstance(did, int) and did > 0:
+            state_key = (int(did), int(ch))
+        if state_key and et in {"videoloss_started", "videoloss_stopped", "edge_stream_offline", "edge_stream_online"}:
+            try:
+                confirm_offline_s = float(self.env.get("EDGE_VIDEOLOSS_CONFIRM_SECONDS") or 15)
+            except Exception:
+                confirm_offline_s = 15.0
+            try:
+                confirm_online_s = float(self.env.get("EDGE_RECOVERY_CONFIRM_SECONDS") or 10)
+            except Exception:
+                confirm_online_s = 10.0
+            try:
+                alert_dedupe_s = float(self.env.get("EDGE_EVENT_DEDUPE_SECONDS") or 600)
+            except Exception:
+                alert_dedupe_s = 600.0
+            notify_recovery = _bool(self.env.get("EDGE_NOTIFY_RECOVERY") or "0")
+
+            with self._lock:
+                st = self._stream_state.get(state_key) or {"status": "unknown", "pending_offline": None, "pending_online": None, "last_alert_ts": 0.0}
+                status = sanitize(st.get("status") or "unknown")
+                last_alert_ts = float(st.get("last_alert_ts") or 0.0)
+
+                if et in {"videoloss_started", "edge_stream_offline"}:
+                    st["pending_offline"] = {"ts": now_evt, "ev": dict(ev), "payload": dict(payload), "source": sanitize(source)}
+                    st["pending_online"] = None
+                    if status != "offline":
+                        st["status"] = "unstable"
+                    self._stream_state[state_key] = st
+                    suppress_notify = True
+
+                elif et in {"videoloss_stopped", "edge_stream_online"}:
+                    st["pending_offline"] = None
+                    if status == "offline":
+                        if notify_recovery:
+                            st["pending_online"] = {"ts": now_evt, "ev": dict(ev), "payload": dict(payload), "source": sanitize(source)}
+                        else:
+                            st["pending_online"] = None
+                            st["status"] = "online"
+                        self._stream_state[state_key] = st
+                        suppress_notify = True
+                    else:
+                        st["pending_online"] = None
+                        st["status"] = "online"
+                        self._stream_state[state_key] = st
+                        suppress_notify = True
+
+                st = self._stream_state.get(state_key) or st
+                st["confirm_offline_s"] = confirm_offline_s
+                st["confirm_online_s"] = confirm_online_s
+                st["alert_dedupe_s"] = alert_dedupe_s
+                st["notify_recovery"] = bool(notify_recovery)
+                if last_alert_ts:
+                    st["last_alert_ts"] = last_alert_ts
+                self._stream_state[state_key] = st
+        if et in {"videoloss_started", "videoloss_stopped"} and isinstance(did, int) and did > 0:
+            now = time.time()
+            try:
+                dedupe_seconds = float(self.env.get("EDGE_EVENT_DEDUPE_SECONDS") or 60)
+            except Exception:
+                dedupe_seconds = 60.0
+            try:
+                min_videoloss_seconds = float(self.env.get("EDGE_VIDEOLOSS_MIN_SECONDS") or 30)
+            except Exception:
+                min_videoloss_seconds = 30.0
+
+
+            sig = (et, int(did), int(ch))
+            with self._lock:
+                last = float(self._event_last_ts.get(sig) or 0)
+                self._event_last_ts[sig] = now
+                if et == "videoloss_started":
+                    self._videoloss_started_ts[(int(did), int(ch))] = now
+                started = float(self._videoloss_started_ts.get((int(did), int(ch))) or 0)
+                if et == "videoloss_stopped":
+                    self._videoloss_started_ts.pop((int(did), int(ch)), None)
+
+            if last and (now - last) < max(1.0, dedupe_seconds):
+                suppress_notify = True
+            if et == "videoloss_stopped" and started and (now - started) < max(0.0, min_videoloss_seconds):
+                suppress_notify = True
+
+        fired_count = 0
+        if not suppress_notify:
+            fired_count = self._notify_from_event(ev)
+        else:
+            with self._lock:
+                self._notify_suppressed_total += 1
+
+        forwarded = self._forward_push(payload, source)
+        return {"ok": True, "forwarded": forwarded, "rules_fired": fired_count, "notify_suppressed": suppress_notify}
+
+    def _notify_from_event(self, ev: Dict[str, Any]) -> int:
         self._engine.push_event(ev)
 
         with self._lock:
@@ -215,9 +338,56 @@ class PushRelay:
                                 f"[Edge Notify] wa client={_mask(cwa)} ok={ok_client} | global={_mask(gwa)} ok={ok_global}"
                             )
                 fired_count += 1
+        return fired_count
 
-        forwarded = self._forward_push(payload, source)
-        return {"ok": True, "forwarded": forwarded, "rules_fired": fired_count}
+    def _loop_state(self) -> None:
+        while not self._stop:
+            try:
+                self._process_stream_state()
+            except Exception:
+                pass
+            time.sleep(1)
+
+    def _process_stream_state(self) -> None:
+        now = time.time()
+        to_fire: list = []
+        with self._lock:
+            for k, st in list(self._stream_state.items()):
+                status = sanitize(st.get("status") or "unknown")
+                confirm_offline_s = float(st.get("confirm_offline_s") or 15)
+                confirm_online_s = float(st.get("confirm_online_s") or 10)
+                alert_dedupe_s = float(st.get("alert_dedupe_s") or 600)
+                last_alert_ts = float(st.get("last_alert_ts") or 0.0)
+
+                po = st.get("pending_offline")
+                if po and isinstance(po, dict):
+                    ts = float(po.get("ts") or 0)
+                    if ts and (now - ts) >= max(0.0, confirm_offline_s) and status != "offline":
+                        if (not last_alert_ts) or (now - last_alert_ts) >= max(1.0, alert_dedupe_s):
+                            st["status"] = "offline"
+                            st["pending_offline"] = None
+                            st["last_alert_ts"] = now
+                            to_fire.append(po.get("ev"))
+                        else:
+                            st["status"] = "offline"
+                            st["pending_offline"] = None
+
+                pn = st.get("pending_online")
+                if pn and isinstance(pn, dict):
+                    ts = float(pn.get("ts") or 0)
+                    if ts and (now - ts) >= max(0.0, confirm_online_s):
+                        st["status"] = "online"
+                        st["pending_online"] = None
+                        to_fire.append(pn.get("ev"))
+
+                self._stream_state[k] = st
+
+        for ev in to_fire:
+            if isinstance(ev, dict):
+                try:
+                    self._notify_from_event(ev)
+                except Exception:
+                    pass
 
     def _ingest_url(self) -> str:
         return _sanitize_base_url(self.env.get("INGEST_API_URL") or "")

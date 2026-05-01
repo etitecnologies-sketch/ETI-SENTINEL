@@ -108,12 +108,22 @@ def main() -> None:
     refresh_seconds = int(os.getenv("REMOTE_REFRESH_SECONDS") or 60)
     default_timeout = int(os.getenv("DEFAULT_TIMEOUT_SECONDS") or 8)
     default_interval = int(os.getenv("DEFAULT_INTERVAL_SECONDS") or 30)
+    try:
+        dedupe_seconds = float(os.getenv("EDGE_EVENT_DEDUPE_SECONDS") or 60)
+    except Exception:
+        dedupe_seconds = 60.0
+    try:
+        min_videoloss_seconds = float(os.getenv("EDGE_VIDEOLOSS_MIN_SECONDS") or 30)
+    except Exception:
+        min_videoloss_seconds = 30.0
 
     if not collector_key:
         raise SystemExit("COLLECTOR_KEY obrigatório")
 
     next_run: Dict[Tuple[int, int, str], float] = {}
     last_ok: Dict[Tuple[int, int, str], Optional[bool]] = {}
+    last_sent: Dict[Tuple[str, int, int, str], float] = {}
+    started_at: Dict[Tuple[int, int, str], float] = {}
 
     while True:
         try:
@@ -169,11 +179,28 @@ def main() -> None:
                     desc = f"RTSP sem vídeo ({display})"
                     if err:
                         desc = f"{desc} - {err}"
-                    _post_push(ingest_api_url, token, device_id, "videoloss_started", channel, desc, "warn")
+                    now2 = time.time()
+                    started_at[k] = now2
+                    sig = ("videoloss_started", device_id, channel, full_url)
+                    last = float(last_sent.get(sig) or 0)
+                    if (not last) or (now2 - last) >= max(1.0, dedupe_seconds):
+                        _post_push(ingest_api_url, token, device_id, "videoloss_started", channel, desc, "warn")
+                        last_sent[sig] = now2
                     logging.warning("[%s] %s -> OFF (%s)", name, display, err or "fail")
                 elif prev is False and ok is True:
                     desc = f"RTSP voltou ({display})"
-                    _post_push(ingest_api_url, token, device_id, "videoloss_stopped", channel, desc, "info")
+                    now2 = time.time()
+                    st = float(started_at.get(k) or 0)
+                    if st and (now2 - st) < max(0.0, min_videoloss_seconds):
+                        logging.info("[%s] %s -> ON (ignored short flap %.1fs)", name, display, (now2 - st))
+                        started_at.pop(k, None)
+                        continue
+                    started_at.pop(k, None)
+                    sig = ("videoloss_stopped", device_id, channel, full_url)
+                    last = float(last_sent.get(sig) or 0)
+                    if (not last) or (now2 - last) >= max(1.0, dedupe_seconds):
+                        _post_push(ingest_api_url, token, device_id, "videoloss_stopped", channel, desc, "info")
+                        last_sent[sig] = now2
                     logging.info("[%s] %s -> ON", name, display)
 
         for k in list(next_run.keys()):

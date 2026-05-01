@@ -1,5 +1,12 @@
 $ErrorActionPreference = "Stop"
 
+param(
+    [string]$Ingest,
+    [string]$CollectorKey,
+    [string]$ClientId,
+    [switch]$Update
+)
+
 try {
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     [Console]::OutputEncoding = $utf8
@@ -98,6 +105,19 @@ function Ensure-Ffmpeg {
     }
 }
 
+function Read-EnvValue([string]$envPath, [string]$key) {
+    try {
+        if (!(Test-Path $envPath)) { return "" }
+        $lines = Get-Content $envPath -ErrorAction SilentlyContinue
+        foreach ($ln in $lines) {
+            if ($ln -match ("^" + [Regex]::Escape($key) + "=(.*)$")) {
+                return $Matches[1]
+            }
+        }
+    } catch {}
+    return ""
+}
+
 function Download-Repo([string]$destDir) {
     try { Stop-ScheduledTask -TaskName "ETI_SENTINEL_EDGE" -ErrorAction SilentlyContinue } catch {}
     try {
@@ -108,6 +128,15 @@ function Download-Repo([string]$destDir) {
         Get-CimInstance Win32_Process |
             Where-Object { $_.CommandLine -and ($_.CommandLine -like "*\\ETI-SENTINEL\\*") } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+
+    $backupEnv = ""
+    try {
+        $oldEnv = Join-Path $destDir "edge-agent\.env"
+        if (Test-Path $oldEnv) {
+            $backupEnv = Join-Path $env:TEMP ("eti-edge-env-" + [Guid]::NewGuid().ToString("N") + ".env")
+            Copy-Item $oldEnv $backupEnv -Force
+        }
     } catch {}
 
     $tmp = Join-Path $env:TEMP ("eti-sentinel-main-" + [Guid]::NewGuid().ToString("N"))
@@ -137,6 +166,15 @@ function Download-Repo([string]$destDir) {
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     Copy-Item (Join-Path $src.FullName "*") $destDir -Recurse -Force
     Remove-Item $tmp -Recurse -Force
+
+    try {
+        if ($backupEnv) {
+            $edgeDir = Join-Path $destDir "edge-agent"
+            New-Item -ItemType Directory -Force -Path $edgeDir | Out-Null
+            Copy-Item $backupEnv (Join-Path $edgeDir ".env") -Force
+            Remove-Item $backupEnv -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
 }
 
 function Ensure-Env([string]$edgeDir, [string]$ingest, [string]$key, [string]$cid) {
@@ -147,10 +185,24 @@ function Ensure-Env([string]$edgeDir, [string]$ingest, [string]$key, [string]$ci
     }
     $lines = @()
     if (Test-Path $envPath) { $lines = Get-Content $envPath -ErrorAction SilentlyContinue }
-    $lines = $lines | Where-Object { $_ -notmatch '^(INGEST_API_URL|COLLECTOR_KEY|CLIENT_ID)=' }
+    $lines = $lines | Where-Object { $_ -notmatch '^(INGEST_API_URL|COLLECTOR_KEY|CLIENT_ID|ENABLE_STREAMING|ENABLE_RTSP_MONITOR|AGENT_API_BIND|AGENT_API_PORT|EDGE_USE_PYTHONW|EDGE_EVENT_DEDUPE_SECONDS|EDGE_VIDEOLOSS_CONFIRM_SECONDS|EDGE_RECOVERY_CONFIRM_SECONDS|EDGE_VIDEOLOSS_MIN_SECONDS|EDGE_NOTIFY_RECOVERY|EDGE_SUPPRESS_EVENT_TYPES|STREAM_RESTART_COOLDOWN_SECONDS|STREAM_MAX_RETRIES|STREAM_RETRY_MAX_BACKOFF_SECONDS)=' }
     $lines += "INGEST_API_URL=$ingest"
     $lines += "COLLECTOR_KEY=$key"
     if ($cid) { $lines += "CLIENT_ID=$cid" }
+    $lines += "ENABLE_STREAMING=1"
+    $lines += "ENABLE_RTSP_MONITOR=0"
+    $lines += "AGENT_API_BIND=127.0.0.1"
+    $lines += "AGENT_API_PORT=8808"
+    $lines += "EDGE_USE_PYTHONW=1"
+    $lines += "EDGE_EVENT_DEDUPE_SECONDS=600"
+    $lines += "EDGE_VIDEOLOSS_CONFIRM_SECONDS=15"
+    $lines += "EDGE_RECOVERY_CONFIRM_SECONDS=10"
+    $lines += "EDGE_VIDEOLOSS_MIN_SECONDS=30"
+    $lines += "EDGE_NOTIFY_RECOVERY=0"
+    $lines += "EDGE_SUPPRESS_EVENT_TYPES="
+    $lines += "STREAM_RESTART_COOLDOWN_SECONDS=60"
+    $lines += "STREAM_MAX_RETRIES=0"
+    $lines += "STREAM_RETRY_MAX_BACKOFF_SECONDS=60"
     [System.IO.File]::WriteAllLines($envPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
@@ -254,13 +306,15 @@ function Ensure-Task([string]$installDir) {
     try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {}
     try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
 
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$entry`"" -WorkingDirectory $edgeDir
+    $cmd = "cd `"$edgeDir`"; while (`$true) { & `"$pythonw`" `"$entry`"; Start-Sleep 3 }"
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$cmd`"" -WorkingDirectory $edgeDir
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     if (Test-Admin) {
         $trigger = New-ScheduledTaskTrigger -AtStartup
-        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -RunLevel Highest -User "SYSTEM" -Force | Out-Null
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -User "SYSTEM" -Force | Out-Null
     } else {
         $trigger = New-ScheduledTaskTrigger -AtLogOn
-        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -RunLevel Highest -Force | Out-Null
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
     }
     Start-ScheduledTask -TaskName $taskName
 }
@@ -272,21 +326,31 @@ Ensure-Python
 Ensure-Ffmpeg
 Ensure-MediaMTX
 
-$defaultIngest = "https://eti-sentinel-production.up.railway.app"
-$defaultKey = "etiSENTINEL_collector_2026_etitecnologies"
+$existingEnv = Join-Path $installDir "edge-agent\.env"
+$defaultIngest = (Read-EnvValue $existingEnv "INGEST_API_URL").Trim()
+if (!$defaultIngest) { $defaultIngest = "https://eti-sentinel-production.up.railway.app" }
+$defaultKey = (Read-EnvValue $existingEnv "COLLECTOR_KEY").Trim()
+if (!$defaultKey) { $defaultKey = "etiSENTINEL_collector_2026_etitecnologies" }
+$defaultCid = (Read-EnvValue $existingEnv "CLIENT_ID").Trim()
 
-$ingest = (Read-Host "INGEST_API_URL (Enter = $defaultIngest)").Trim()
+$ingest = $Ingest.Trim()
+if (!$ingest -and $Update) { $ingest = $defaultIngest }
+if (!$ingest) { $ingest = (Read-Host "INGEST_API_URL (Enter = $defaultIngest)").Trim() }
 if (!$ingest) { $ingest = $defaultIngest }
 $ingest = $ingest.Trim('`').Trim('"').Trim("'").Trim()
 if (!($ingest.StartsWith("http://") -or $ingest.StartsWith("https://"))) { $ingest = "https://$ingest" }
 $ingest = $ingest.TrimEnd("/")
 
-$key = (Read-Host "COLLECTOR_KEY (Enter = default)").Trim()
+$key = $CollectorKey.Trim()
+if (!$key -and $Update) { $key = $defaultKey }
+if (!$key) { $key = (Read-Host "COLLECTOR_KEY (Enter = default)").Trim() }
 if (!$key) { $key = $defaultKey }
 $key = $key.Trim('`').Trim('"').Trim("'").Trim()
 if (!$key) { throw "COLLECTOR_KEY é obrigatório." }
 
-$cid = (Read-Host "CLIENT_ID (opcional)").Trim()
+$cid = $ClientId.Trim()
+if (!$cid -and $Update) { $cid = $defaultCid }
+if (!$cid) { $cid = (Read-Host "CLIENT_ID (opcional)").Trim() }
 $cid = $cid.Trim('`').Trim('"').Trim("'").Trim()
 
 Download-Repo $installDir

@@ -3,10 +3,15 @@ import platform
 import subprocess
 import sys
 import time
+import threading
+import logging
+import ctypes
 from pathlib import Path
 
 from dotenv import load_dotenv
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import shutil
 import json
 
@@ -14,6 +19,19 @@ try:
     import psutil
 except Exception:
     psutil = None
+
+
+def get_session():
+    session = requests.Session()
+    retries = Retry(
+        total=5,
+        backoff_factor=2,
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+    return session
 
 def _bool(v: str) -> bool:
     return str(v or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -180,14 +198,14 @@ def run_check(here: Path, env: dict) -> int:
         print("ERRO: INGEST_API_URL não configurado")
         return 1
 
-    sess = requests.Session()
+    sess = get_session()
 
     def get(path: str, headers=None, params=None):
         url = ingest_api_url + path
         last = None
-        for attempt in range(2):
+        for attempt in range(3):
             try:
-                r = sess.get(url, headers=headers or {}, params=params or {}, timeout=(3, timeout))
+                r = sess.get(url, headers=headers or {}, params=params or {}, timeout=(10, 60))
                 ct = str(r.headers.get("content-type") or "")
                 if "application/json" in ct:
                     try:
@@ -253,20 +271,30 @@ def main() -> None:
     if "--check" in sys.argv or "check" in sys.argv:
         return
 
+    if os.name == "nt":
+        try:
+            mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "ETI_SENTINEL_EDGE_AGENT_SINGLETON")
+            if ctypes.windll.kernel32.GetLastError() == 183:
+                raise SystemExit("Edge Agent já está em execução.")
+        except Exception:
+            pass
+
     repo_root = here.parent
     python = sys.executable
     if os.name == "nt":
         try:
-            p = str(python or "")
-            if p.lower().endswith("\\python.exe"):
-                pw = p[:-len("\\python.exe")] + "\\pythonw.exe"
-                if Path(pw).exists():
-                    python = pw
+            use_pw = str(env.get("EDGE_USE_PYTHONW") or "1").strip().lower() not in {"0", "false", "no", "off"}
+            if use_pw:
+                p = str(python or "")
+                if p.lower().endswith("\\python.exe"):
+                    pw = p[:-len("\\python.exe")] + "\\pythonw.exe"
+                    if Path(pw).exists():
+                        python = pw
         except Exception:
             pass
 
     enable_device = _bool(env.get("ENABLE_DEVICE_MONITOR", "1"))
-    enable_rtsp = _bool(env.get("ENABLE_RTSP_MONITOR", "1"))
+    enable_streaming = _bool(env.get("ENABLE_STREAMING", "1"))
     enable_onvif = _bool(env.get("ENABLE_ONVIF_COLLECTOR", "1"))
     enable_discovery = _bool(env.get("ENABLE_DISCOVERY", "1"))
     enable_api = _bool(env.get("ENABLE_AGENT_API", "1"))
@@ -279,97 +307,50 @@ def main() -> None:
     agent_api_port = int(_sanitize(env.get("AGENT_API_PORT") or "8808") or 8808)
     env.setdefault("EDGE_PUSH_URL", f"http://127.0.0.1:{agent_api_port}/api/push")
     if enable_api:
-        specs.append([python, str(here / "agent_api.py")])
+        try:
+            import agent_api
+
+            bind = _sanitize(env.get("AGENT_API_BIND") or "0.0.0.0") or "0.0.0.0"
+            store = agent_api.JobStore(here / ".state" / "agent_api.json")
+            log_path = here / ".state" / "agent_api.log"
+            httpd = agent_api.Server((bind, agent_api_port), agent_api.Handler, env, store, log_path)
+            httpd.relay.start()
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            print(f"[INFO] Agent API (relay) iniciado em {bind}:{agent_api_port}")
+            os.environ.setdefault("EDGE_PUSH_URL", f"http://127.0.0.1:{agent_api_port}/api/push")
+        except Exception as e:
+            print(f"[WARN] Falha ao iniciar Agent API (relay): {e}")
     if enable_device:
         specs.append([python, str(here / "device_monitor.py")])
-    if enable_rtsp:
-        # Inicia servidor HLS simples para servir os fragmentos de vídeo
+    if enable_streaming:
         try:
-            from http.server import SimpleHTTPRequestHandler, HTTPServer
-            import threading
+            from services.mediamtx_service import start_mediamtx
+            from core.api_client import APIClient
+            from core.stream_manager import StreamManager
+            from core.state_cache import StateCache
+            from workers.stream_worker import StreamWorker
+            from workers.watchdog_worker import WatchdogWorker
+            from workers.heartbeat_worker import HeartbeatWorker
 
-            class CORSRequestHandler(SimpleHTTPRequestHandler):
-                def end_headers(self):
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.send_header('Access-Control-Allow-Methods', 'GET')
-                    self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
-                    return super().end_headers()
+            logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(asctime)s %(levelname)s %(message)s")
 
-            def run_hls_server():
-                hls_dir = here / "hls"
-                os.makedirs(hls_dir, exist_ok=True)
-                # Salva o diretório atual para voltar depois
-                old_cwd = os.getcwd()
-                try:
-                    os.chdir(hls_dir)
-                    
-                    # Inicia MediaMTX se disponível (porta 8889 para WebRTC, 8888 para HLS)
-                    if mtx_exe:
-                        try:
-                            # Configuração mínima via env vars para o MediaMTX
-                            mtx_env = os.environ.copy()
-                            mtx_env["MTX_PATHS_ALL_SOURCE"] = "publisher"
-                            mtx_env["MTX_WEBRTC"] = "yes"
-                            mtx_env["MTX_HLS"] = "yes"
-                            subprocess.Popen([mtx_exe], cwd=str(Path(mtx_exe).parent), env=mtx_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            print(f"[INFO] MediaMTX (WebRTC/HLS) iniciado a partir de: {mtx_exe}")
-                        except Exception as e:
-                            print(f"[ERROR] Falha ao iniciar MediaMTX: {e}")
-                    else:
-                        print("[WARN] MediaMTX não encontrado. WebRTC/HLS não funcionarão.")
+            if mtx_exe:
+                proc = start_mediamtx(mtx_exe)
+                if proc:
+                    print(f"[INFO] MediaMTX (WebRTC/HLS) iniciado a partir de: {mtx_exe}")
+            api = APIClient()
+            manager = StreamManager(max_retries=int(_sanitize(env.get("STREAM_MAX_RETRIES") or "0") or 0))
+            cache = StateCache(cache_file=_sanitize(env.get("CACHE_FILE") or str(here / ".state" / "rtsp_cache.json")))
 
-                    httpd = HTTPServer(('0.0.0.0', 8000), CORSRequestHandler)
-                    print("[INFO] Servidor de API de Vídeo ativo na porta 8000")
-                    
-                    # Motor de Transmissão (FFmpeg -> MediaMTX)
-                    def start_streams():
-                        active_procs = {}
-                        while True:
-                            try:
-                                # Busca as configs de RTSP habilitadas
-                                url = f"{env.get('INGEST_API_URL')}/collector/rtsp-config"
-                                r = requests.get(url, headers={"x-collector-key": env.get("COLLECTOR_KEY")}, timeout=10)
-                                if r.ok:
-                                    configs = r.json()
-                                    current_ids = set()
-                                    for cfg in configs:
-                                        user = cfg.get("username")
-                                        pw = cfg.get("password")
-                                        dev_id = cfg.get("device_id")
-                                        for s in cfg.get("streams", []):
-                                            if not s.get("enabled"): continue
-                                            sid = f"{dev_id}_ch{s.get('channel')}"
-                                            current_ids.add(sid)
-                                            if sid not in active_procs:
-                                                rtsp = s.get("url").replace("{username}", user).replace("{password}", pw)
-                                                # Envia para o MediaMTX via RTSP (localhost:8554)
-                                                # O MediaMTX converterá automaticamente para WebRTC e HLS
-                                                cmd = [
-                                                    ffmpeg_exe, "-loglevel", "error", "-re", "-rtsp_transport", "tcp", "-i", rtsp,
-                                                    "-c", "copy", "-f", "rtsp", f"rtsp://localhost:8554/{sid}"
-                                                ]
-                                                active_procs[sid] = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                                print(f"[VIDEO] Publicando no MediaMTX: {sid}")
-                                    
-                                    # Mata streams removidos
-                                    for sid in list(active_procs.keys()):
-                                        if sid not in current_ids:
-                                            active_procs[sid].terminate()
-                                            del active_procs[sid]
-                            except Exception as e:
-                                print(f"[ERROR] Loop de vídeo: {e}")
-                            time.sleep(30)
-                    
-                    threading.Thread(target=start_streams, daemon=True).start()
-                    httpd.serve_forever()
-                finally:
-                    os.chdir(old_cwd)
+            stream_worker = StreamWorker(api, manager, cache)
+            watchdog_worker = WatchdogWorker(manager)
+            heartbeat_worker = HeartbeatWorker(api, interval=int(_sanitize(env.get("HEARTBEAT_INTERVAL") or "15") or 15))
 
-            threading.Thread(target=run_hls_server, daemon=True).start()
+            threading.Thread(target=stream_worker.run, daemon=True).start()
+            threading.Thread(target=watchdog_worker.run, daemon=True).start()
+            threading.Thread(target=heartbeat_worker.run, daemon=True).start()
         except Exception as e:
-            print(f"[ERROR] Falha ao iniciar servidor HLS: {e}")
-
-        specs.append([python, str(repo_root / "rtsp-monitor" / "rtsp_monitor.py")])
+            print(f"[ERROR] Falha ao iniciar streaming PRO: {e}")
     if enable_onvif:
         env.setdefault("ONVIF_REMOTE", "1")
         specs.append([python, str(repo_root / "onvif-collector" / "onvif_collector.py")])
@@ -380,24 +361,31 @@ def main() -> None:
     if enable_tray:
         specs.append([python, str(here / "tray_app.py")])
 
-    if not specs:
+    if not specs and not enable_streaming and not enable_api:
         raise SystemExit("Nenhum módulo habilitado")
 
     procs = {}
     for args in specs:
         procs[_proc_name(args)] = _spawn(args, env)
 
-    while True:
-        time.sleep(2)
-        for name, p in list(procs.items()):
-            rc = p.poll()
-            if rc is None:
-                continue
+    try:
+        while True:
             time.sleep(2)
-            for args in specs:
-                if _proc_name(args) == name:
-                    procs[name] = _spawn(args, env)
-                    break
+            for name, p in list(procs.items()):
+                rc = p.poll()
+                if rc is None:
+                    continue
+                time.sleep(2)
+                for args in specs:
+                    if _proc_name(args) == name:
+                        procs[name] = _spawn(args, env)
+                        break
+    except KeyboardInterrupt:
+        for p in list(procs.values()):
+            try:
+                p.terminate()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
