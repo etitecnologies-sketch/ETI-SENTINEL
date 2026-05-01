@@ -129,14 +129,37 @@ class PushRelay:
         with self._lock:
             return [{"id": r.get("id"), "name": r.get("name"), "enabled": r.get("enabled")} for r in (self._rules or [])]
 
-    def events_recent(self, limit: int = 50) -> Any:
+    def events_recent(self, limit: int = 50, prefix: str = "", source: str = "", event_type: str = "") -> Any:
         try:
             lim = int(limit or 50)
         except Exception:
             lim = 50
-        lim = max(1, min(200, lim))
+        lim = max(1, min(500, lim))
+        pfx = sanitize(prefix or "")
+        src = sanitize(source or "")
+        et = sanitize(event_type or "")
+
         with self._lock:
-            return list(self._recent_events[-lim:])
+            data = list(self._recent_events)
+
+        if not (pfx or src or et):
+            return data[-lim:]
+
+        out = []
+        for rec in reversed(data):
+            try:
+                if pfx and not sanitize(rec.get("event_type") or "").startswith(pfx):
+                    continue
+                if src and sanitize(rec.get("source") or "") != src:
+                    continue
+                if et and sanitize(rec.get("event_type") or "") != et:
+                    continue
+                out.append(rec)
+                if len(out) >= lim:
+                    break
+            except Exception:
+                continue
+        return list(reversed(out))
 
     def handle_event(self, payload: Dict[str, Any], source: str) -> Dict[str, Any]:
         ev = {
@@ -193,8 +216,8 @@ class PushRelay:
                 "snapshot_len": int(snap_len),
             }
             self._recent_events.append(rec)
-            if len(self._recent_events) > 400:
-                self._recent_events = self._recent_events[-200:]
+            if len(self._recent_events) > 5000:
+                self._recent_events = self._recent_events[-2000:]
 
         suppress_notify = False
         et = sanitize(ev.get("event_type") or "")
@@ -1005,7 +1028,10 @@ class Handler(BaseHTTPRequestHandler):
                     lim = int(q.get("limit") or 50)
                 except Exception:
                     lim = 50
-                return self._json(200, {"ok": True, "events": self.server.relay.events_recent(lim)})
+                pfx = sanitize(q.get("prefix") or "")
+                src = sanitize(q.get("source") or "")
+                et = sanitize(q.get("event_type") or "")
+                return self._json(200, {"ok": True, "events": self.server.relay.events_recent(lim, prefix=pfx, source=src, event_type=et)})
             if path == "/api/recordings/list":
                 base_dir = Path(sanitize(self.server.env.get("RECORD_BASE_DIR") or str(Path(__file__).resolve().parent / ".recordings"))).resolve()
                 device_id = sanitize(q.get("device_id") or "")
