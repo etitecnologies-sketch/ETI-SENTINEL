@@ -295,6 +295,18 @@ class AIWorker:
                                 if (now - last_dbg) >= max(1.0, dbg_every):
                                     self._last_debug_ts[stream_key] = now
                                     logger.info(f"[AI] {stream_key} cap not ready (backoff)")
+                                    try:
+                                        self._push_event(
+                                            "x",
+                                            did,
+                                            ch,
+                                            "ai_debug",
+                                            "info",
+                                            f"stream={stream_key} cap_not_ready backoff",
+                                            snapshot_jpg_b64="",
+                                        )
+                                    except Exception:
+                                        pass
                             continue
                         ok, frame = cap.read()
                         if not ok or frame is None:
@@ -306,6 +318,18 @@ class AIWorker:
                                 if (now2 - last_dbg) >= max(1.0, dbg_every):
                                     self._last_debug_ts[stream_key] = now2
                                     logger.info(f"[AI] {stream_key} frame read failed, reconnecting")
+                                    try:
+                                        self._push_event(
+                                            "x",
+                                            did,
+                                            ch,
+                                            "ai_debug",
+                                            "info",
+                                            f"stream={stream_key} frame_read_failed reconnecting",
+                                            snapshot_jpg_b64="",
+                                        )
+                                    except Exception:
+                                        pass
                             continue
 
                         try:
