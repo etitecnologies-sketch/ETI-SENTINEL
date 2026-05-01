@@ -333,7 +333,25 @@ def main() -> None:
             from workers.heartbeat_worker import HeartbeatWorker
             from workers.ai_worker import AIWorker
 
-            logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(asctime)s %(levelname)s %(message)s")
+            try:
+                (here / ".state").mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            log_file = _sanitize(env.get("EDGE_LOG_FILE") or str(here / ".state" / "edge_agent.log"))
+            level = os.getenv("LOG_LEVEL", "INFO").upper()
+            fmt = "%(asctime)s %(levelname)s %(message)s"
+            root = logging.getLogger()
+            if not root.handlers:
+                try:
+                    fh = logging.FileHandler(log_file, encoding="utf-8")
+                    fh.setFormatter(logging.Formatter(fmt))
+                    sh = logging.StreamHandler()
+                    sh.setFormatter(logging.Formatter(fmt))
+                    root.addHandler(fh)
+                    root.addHandler(sh)
+                    root.setLevel(level)
+                except Exception:
+                    logging.basicConfig(level=level, format=fmt)
 
             if mtx_exe:
                 proc = start_mediamtx(mtx_exe)
