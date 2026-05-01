@@ -43,6 +43,7 @@ class AIWorker:
         self._cap_fail_ts: Dict[str, float] = {}
         self._last_frame_ts: Dict[str, float] = {}
         self._last_event_ts: Dict[Tuple[int, int, str], float] = {}
+        self._last_debug_ts: Dict[str, float] = {}
         self._sess = requests.Session()
 
         self._model = None
@@ -246,6 +247,7 @@ class AIWorker:
             return
 
         logger.info("[AI] Started")
+        debug = _bool(os.getenv("AI_DEBUG_LOG") or "0")
 
         try:
             conf_th = float(os.getenv("AI_CONF_THRESHOLD") or 0.6)
@@ -255,6 +257,10 @@ class AIWorker:
             img_size = int(os.getenv("AI_IMAGE_SIZE") or 640)
         except Exception:
             img_size = 640
+        try:
+            dbg_every = float(os.getenv("AI_DEBUG_EVERY_SECONDS") or 10)
+        except Exception:
+            dbg_every = 10.0
 
         cv2 = self._cv2
         model = self._model
@@ -284,14 +290,30 @@ class AIWorker:
 
                         cap = self._cap(stream_key)
                         if cap is None:
+                            if debug:
+                                last_dbg = float(self._last_debug_ts.get(stream_key) or 0.0)
+                                if (now - last_dbg) >= max(1.0, dbg_every):
+                                    self._last_debug_ts[stream_key] = now
+                                    logger.info(f"[AI] {stream_key} cap not ready (backoff)")
                             continue
                         ok, frame = cap.read()
                         if not ok or frame is None:
                             self._release_cap(stream_key)
                             self._cap_fail_ts[stream_key] = time.time()
+                            if debug:
+                                last_dbg = float(self._last_debug_ts.get(stream_key) or 0.0)
+                                now2 = time.time()
+                                if (now2 - last_dbg) >= max(1.0, dbg_every):
+                                    self._last_debug_ts[stream_key] = now2
+                                    logger.info(f"[AI] {stream_key} frame read failed, reconnecting")
                             continue
 
-                        res = model.predict(frame, imgsz=img_size, verbose=False)
+                        try:
+                            res = model.predict(frame, imgsz=img_size, verbose=False)
+                        except Exception as e:
+                            if debug:
+                                logger.warning(f"[AI] {stream_key} model.predict failed: {e}")
+                            continue
                         if not res:
                             continue
                         r0 = res[0]
@@ -301,8 +323,11 @@ class AIWorker:
                             continue
 
                         any_fired = False
+                        det_total = 0
+                        det_pass = 0
                         try:
                             for b in boxes:
+                                det_total += 1
                                 try:
                                     cls_idx = int(b.cls[0]) if hasattr(b, "cls") else int(getattr(b, "cls", 0))
                                 except Exception:
@@ -318,6 +343,7 @@ class AIWorker:
                                     continue
                                 if not self._allowed_class(cls_name):
                                     continue
+                                det_pass += 1
                                 now_evt = time.time()
                                 if not self._cooldown_ok(did, ch, cls_name.lower(), now_evt):
                                     continue
@@ -330,10 +356,19 @@ class AIWorker:
                         except Exception:
                             any_fired = False
 
-                        if any_fired and _bool(os.getenv("AI_DEBUG_LOG") or "0"):
-                            logger.info(f"[AI] Fired events for {stream_key}")
+                        if debug:
+                            last_dbg = float(self._last_debug_ts.get(stream_key) or 0.0)
+                            now2 = time.time()
+                            if any_fired:
+                                logger.info(f"[AI] Fired events for {stream_key} (det_total={det_total} pass={det_pass} conf_th={conf_th})")
+                                self._last_debug_ts[stream_key] = now2
+                            elif (now2 - last_dbg) >= max(1.0, dbg_every):
+                                self._last_debug_ts[stream_key] = now2
+                                logger.info(f"[AI] {stream_key} analyzed (det_total={det_total} pass={det_pass} conf_th={conf_th})")
 
                     except Exception:
+                        if debug:
+                            logger.warning(f"[AI] {stream_key} loop error", exc_info=True)
                         continue
 
             except Exception:
