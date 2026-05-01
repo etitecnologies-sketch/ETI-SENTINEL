@@ -118,17 +118,48 @@ function Read-EnvValue([string]$envPath, [string]$key) {
     return ""
 }
 
-function Download-Repo([string]$destDir) {
-    try { Stop-ScheduledTask -TaskName "ETI_SENTINEL_EDGE" -ErrorAction SilentlyContinue } catch {}
+function Stop-EdgeRuntime([string]$rootDir) {
+    $taskName = "ETI_SENTINEL_EDGE"
+    try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {}
+    try { Disable-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Out-Null } catch {}
     try {
         Get-ScheduledTask -TaskName "ETI_SENTINEL_*" -ErrorAction SilentlyContinue |
             ForEach-Object { Stop-ScheduledTask -TaskName $_.TaskName -ErrorAction SilentlyContinue }
     } catch {}
+
+    $root = $rootDir
+    if ($root) { $root = $root.TrimEnd("\") + "\" }
     try {
         Get-CimInstance Win32_Process |
-            Where-Object { $_.CommandLine -and ($_.CommandLine -like "*\\ETI-SENTINEL\\*") } |
+            Where-Object {
+                ($_.ExecutablePath -and $root -and $_.ExecutablePath -like ($root + "*")) -or
+                ($_.CommandLine -and $root -and $_.CommandLine -like ("*" + $root + "*"))
+            } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     } catch {}
+    try {
+        Get-CimInstance Win32_Process |
+            Where-Object {
+                $_.ExecutablePath -and $_.ExecutablePath -like "*\\ETI-SENTINEL*\\bin\\mediamtx.exe"
+            } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+    try {
+        Get-CimInstance Win32_Process |
+            Where-Object {
+                $_.ExecutablePath -and (
+                    $_.ExecutablePath -like "*\\ETI-SENTINEL*\\bin\\ffmpeg.exe" -or
+                    $_.ExecutablePath -like "*\\ETI-SENTINEL*\\bin\\ffprobe.exe"
+                )
+            } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+
+    try { Start-Sleep -Seconds 2 } catch {}
+}
+
+function Download-Repo([string]$destDir) {
+    Stop-EdgeRuntime $destDir
 
     $backupEnv = ""
     try {
@@ -155,6 +186,7 @@ function Download-Repo([string]$destDir) {
         } catch {
             try {
                 Start-Sleep -Seconds 2
+                Stop-EdgeRuntime $destDir
                 Remove-Item $destDir -Recurse -Force -ErrorAction Stop
             } catch {
                 $old = ($destDir.TrimEnd("\") + ".old." + (Get-Date -Format "yyyyMMdd_HHmmss"))
@@ -164,7 +196,17 @@ function Download-Repo([string]$destDir) {
         }
     }
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-    Copy-Item (Join-Path $src.FullName "*") $destDir -Recurse -Force
+    try {
+        Copy-Item (Join-Path $src.FullName "*") $destDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Stop-EdgeRuntime $destDir
+        try {
+            Copy-Item (Join-Path $src.FullName "*") $destDir -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Wrn "Falha ao copiar binários em uso. Continuando sem sobrescrever executáveis."
+            Copy-Item (Join-Path $src.FullName "*") $destDir -Recurse -Force -Exclude "mediamtx.exe","ffmpeg.exe","ffprobe.exe"
+        }
+    }
     Remove-Item $tmp -Recurse -Force
 
     try {
@@ -361,6 +403,8 @@ $cid = $cid.Trim('`').Trim('"').Trim("'").Trim()
 Download-Repo $installDir
 $edgeDir = Join-Path $installDir "edge-agent"
 Ensure-Env $edgeDir $ingest $key $cid
+Ensure-Ffmpeg
+Ensure-MediaMTX
 Ensure-Venv $edgeDir
 Ensure-Task $installDir
 Ensure-Icon $installDir
