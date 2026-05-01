@@ -331,6 +331,7 @@ def main() -> None:
             from workers.stream_worker import StreamWorker
             from workers.watchdog_worker import WatchdogWorker
             from workers.heartbeat_worker import HeartbeatWorker
+            from workers.ai_worker import AIWorker
 
             logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(asctime)s %(levelname)s %(message)s")
 
@@ -345,10 +346,12 @@ def main() -> None:
             stream_worker = StreamWorker(api, manager, cache)
             watchdog_worker = WatchdogWorker(manager)
             heartbeat_worker = HeartbeatWorker(api, interval=int(_sanitize(env.get("HEARTBEAT_INTERVAL") or "15") or 15))
+            ai_worker = AIWorker(manager)
 
             threading.Thread(target=stream_worker.run, daemon=True).start()
             threading.Thread(target=watchdog_worker.run, daemon=True).start()
             threading.Thread(target=heartbeat_worker.run, daemon=True).start()
+            threading.Thread(target=ai_worker.run, daemon=True).start()
         except Exception as e:
             print(f"[ERROR] Falha ao iniciar streaming PRO: {e}")
     if enable_onvif:
