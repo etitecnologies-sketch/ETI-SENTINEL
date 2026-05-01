@@ -341,17 +341,46 @@ def main() -> None:
             level = os.getenv("LOG_LEVEL", "INFO").upper()
             fmt = "%(asctime)s %(levelname)s %(message)s"
             root = logging.getLogger()
-            if not root.handlers:
-                try:
-                    fh = logging.FileHandler(log_file, encoding="utf-8")
+            try:
+                want_file = Path(log_file).resolve()
+            except Exception:
+                want_file = None
+            try:
+                if want_file:
+                    want_file.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+
+            try:
+                has_file_handler = False
+                for h in list(root.handlers or []):
+                    try:
+                        fn = getattr(h, "baseFilename", None)
+                        if fn and want_file and Path(str(fn)).resolve() == want_file:
+                            has_file_handler = True
+                            break
+                    except Exception:
+                        continue
+                if not has_file_handler and want_file:
+                    fh = logging.FileHandler(str(want_file), encoding="utf-8")
                     fh.setFormatter(logging.Formatter(fmt))
+                    root.addHandler(fh)
+            except Exception:
+                pass
+
+            try:
+                has_stream_handler = any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in (root.handlers or []))
+                if not has_stream_handler:
                     sh = logging.StreamHandler()
                     sh.setFormatter(logging.Formatter(fmt))
-                    root.addHandler(fh)
                     root.addHandler(sh)
-                    root.setLevel(level)
-                except Exception:
-                    logging.basicConfig(level=level, format=fmt)
+            except Exception:
+                pass
+
+            try:
+                root.setLevel(level)
+            except Exception:
+                pass
 
             if mtx_exe:
                 proc = start_mediamtx(mtx_exe)

@@ -91,7 +91,7 @@ def _fetch_devices(ingest_api_url: str, collector_key: str, client_id: Optional[
 def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float) -> None:
     edge_push = _sanitize(os.getenv("EDGE_PUSH_URL"))
     url = edge_push or (ingest_api_url.rstrip("/") + "/push")
-    payload = {"token": token, "latency": latency_ms}
+    payload = {"token": token, "event_type": "edge_heartbeat", "severity": "info", "latency": latency_ms}
     requests.post(url, json=payload, headers={"x-event-source": "edge-device-monitor"}, timeout=8)
 
 
