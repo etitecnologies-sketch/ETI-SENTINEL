@@ -120,7 +120,7 @@ app.use((req, res, next) => {
 
 app.get("/", (req, res) => {
   if (hasFrontend) return res.sendFile(frontendIndex);
-  return res.json({ status: "online", service: "ETI SENTINEL API", version: "1.0.4" });
+  return res.json({ status: "online", service: "ETI SENTINEL API", version: "1.0.5" });
 });
 app.get("/health", async (req, res) => {
   try {
@@ -1312,13 +1312,14 @@ app.post("/collector/automation-rules", async (req, res) => {
   if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
 
   try {
+    function sanitizeLabel(v) {
+      return v ? String(v).replace(/["'`]/g, "").trim() : "";
+    }
+
     const cid =
       (req.body?.client_id ? parseInt(req.body.client_id) : null) ||
       (req.query.client_id ? parseInt(req.query.client_id) : null);
     if (!cid) return res.status(400).json({ error: "client_id required" });
-
-    const name = sanitize(req.body?.name || "");
-    if (!name) return res.status(400).json({ error: "name required" });
 
     const enabled = typeof req.body?.enabled === "boolean" ? req.body.enabled === true : true;
 
@@ -1386,6 +1387,28 @@ app.post("/collector/automation-rules", async (req, res) => {
     };
     if (cooldownSecondsRaw !== null) rule.cooldown_seconds = cooldownSecondsRaw;
     if (message) rule.message = message;
+
+    const ridBody = req.body?.id ? parseInt(req.body.id) : null;
+    if (ridBody && Number.isFinite(ridBody) && ridBody > 0) {
+      const existingById = await pool.query("SELECT id, name FROM automation_rules WHERE id=$1 AND client_id=$2 LIMIT 1", [
+        ridBody,
+        cid,
+      ]);
+      if (existingById.rows.length === 0) return res.status(404).json({ error: "not_found" });
+      const nameExisting = existingById.rows[0].name || "";
+      const nameNew = sanitizeLabel(req.body?.name || "") || nameExisting;
+      if (!nameNew) return res.status(400).json({ error: "name required" });
+      await pool.query("UPDATE automation_rules SET name=$1, enabled=$2, rule=$3::jsonb, updated_at=NOW() WHERE id=$4", [
+        nameNew,
+        enabled,
+        JSON.stringify(rule),
+        ridBody,
+      ]);
+      return res.json({ ok: true, id: ridBody, updated: true });
+    }
+
+    const name = sanitizeLabel(req.body?.name || "");
+    if (!name) return res.status(400).json({ error: "name required" });
 
     const existing = await pool.query("SELECT id FROM automation_rules WHERE client_id=$1 AND name=$2 ORDER BY id ASC LIMIT 1", [
       cid,
