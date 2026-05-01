@@ -98,6 +98,7 @@ class PushRelay:
         self._notify_suppressed_total = 0
         self._last_event_ts = 0.0
         self._stream_state: Dict[tuple, Dict[str, Any]] = {}
+        self._recent_events: list = []
 
     def start(self) -> None:
         threading.Thread(target=self._loop_refresh, daemon=True).start()
@@ -127,6 +128,15 @@ class PushRelay:
     def rules_summary(self) -> Any:
         with self._lock:
             return [{"id": r.get("id"), "name": r.get("name"), "enabled": r.get("enabled")} for r in (self._rules or [])]
+
+    def events_recent(self, limit: int = 50) -> Any:
+        try:
+            lim = int(limit or 50)
+        except Exception:
+            lim = 50
+        lim = max(1, min(200, lim))
+        with self._lock:
+            return list(self._recent_events[-lim:])
 
     def handle_event(self, payload: Dict[str, Any], source: str) -> Dict[str, Any]:
         ev = {
@@ -164,6 +174,27 @@ class PushRelay:
         with self._lock:
             self._events_total += 1
             self._last_event_ts = now_evt
+            try:
+                snap = ev.get("snapshot_jpg_b64")
+                has_snap = isinstance(snap, str) and bool(snap)
+                snap_len = int(len(snap)) if isinstance(snap, str) else 0
+            except Exception:
+                has_snap = False
+                snap_len = 0
+            rec = {
+                "ts": float(now_evt),
+                "event_type": sanitize(ev.get("event_type") or ""),
+                "device_id": ev.get("device_id"),
+                "channel": int(ev.get("channel") or 0),
+                "severity": sanitize(ev.get("severity") or ""),
+                "source": sanitize(ev.get("source") or ""),
+                "description": sanitize(ev.get("description") or "")[:200],
+                "has_snapshot": bool(has_snap),
+                "snapshot_len": int(snap_len),
+            }
+            self._recent_events.append(rec)
+            if len(self._recent_events) > 400:
+                self._recent_events = self._recent_events[-200:]
 
         suppress_notify = False
         et = sanitize(ev.get("event_type") or "")
@@ -969,6 +1000,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True, "relay": self.server.relay.status()})
             if path == "/api/rules":
                 return self._json(200, {"ok": True, "rules": self.server.relay.rules_summary()})
+            if path == "/api/events":
+                try:
+                    lim = int(q.get("limit") or 50)
+                except Exception:
+                    lim = 50
+                return self._json(200, {"ok": True, "events": self.server.relay.events_recent(lim)})
             if path == "/api/recordings/list":
                 base_dir = Path(sanitize(self.server.env.get("RECORD_BASE_DIR") or str(Path(__file__).resolve().parent / ".recordings"))).resolve()
                 device_id = sanitize(q.get("device_id") or "")
