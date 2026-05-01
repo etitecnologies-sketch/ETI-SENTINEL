@@ -312,8 +312,7 @@ function Ensure-Task([string]$installDir) {
     try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {}
     try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
 
-    $cmd = "cd `"$edgeDir`"; while (`$true) { & `"$pythonw`" `"$entry`"; Start-Sleep 3 }"
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$cmd`"" -WorkingDirectory $edgeDir
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$entry`"" -WorkingDirectory $edgeDir
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     if (Test-Admin) {
         $trigger = New-ScheduledTaskTrigger -AtStartup
