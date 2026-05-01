@@ -35,6 +35,7 @@ class StreamWorker:
             cooldown_seconds = float(os.getenv("STREAM_RESTART_COOLDOWN_SECONDS") or 20)
         except Exception:
             cooldown_seconds = 20.0
+        force_transcode = str(os.getenv("STREAM_FORCE_TRANSCODE") or "").strip().lower() in {"1", "true", "yes", "on"}
 
         while self.running:
             try:
@@ -89,7 +90,7 @@ class StreamWorker:
                         logger.info(f"[STREAM-WORKER] Starting {stream_key} ({stream_name})")
 
                         try:
-                            proc = start_ffmpeg(rtsp_url, stream_key, transcode=False)
+                            proc = start_ffmpeg(rtsp_url, stream_key, transcode=force_transcode)
                             time.sleep(2)
 
                             if proc.poll() is not None:
