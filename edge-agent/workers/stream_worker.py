@@ -58,10 +58,13 @@ class StreamWorker:
                     streams = device.get("streams") or []
 
                     for s in streams:
-                        if not s.get("enabled"):
+                        enabled = s.get("enabled", True)
+                        if isinstance(enabled, str):
+                            enabled = enabled.strip().lower() not in {"0", "false", "no", "off"}
+                        if enabled is False:
                             continue
 
-                        channel = int(s.get("channel") or 0)
+                        channel = int(s.get("channel") or 1)
                         url_template = s.get("url") or ""
                         transport = s.get("transport", "tcp")
                         stream_name = s.get("name") or f"Channel {channel}"
