@@ -349,6 +349,10 @@ class AIWorker:
                         any_fired = False
                         det_total = 0
                         det_pass = 0
+                        best_conf = 0.0
+                        best_cls = ""
+                        det_conf_ok = 0
+                        det_class_ok = 0
                         try:
                             for b in boxes:
                                 det_total += 1
@@ -360,13 +364,21 @@ class AIWorker:
                                     conf = float(b.conf[0]) if hasattr(b, "conf") else float(getattr(b, "conf", 0.0))
                                 except Exception:
                                     conf = 0.0
+                                try:
+                                    if conf > float(best_conf):
+                                        best_conf = float(conf)
+                                        best_cls = _sanitize(names.get(cls_idx) or str(cls_idx))
+                                except Exception:
+                                    pass
                                 if conf < max(0.0, min(1.0, conf_th)):
                                     continue
+                                det_conf_ok += 1
                                 cls_name = _sanitize(names.get(cls_idx) or str(cls_idx))
                                 if not cls_name:
                                     continue
                                 if not self._allowed_class(cls_name):
                                     continue
+                                det_class_ok += 1
                                 det_pass += 1
                                 now_evt = time.time()
                                 if not self._cooldown_ok(did, ch, cls_name.lower(), now_evt):
@@ -384,11 +396,11 @@ class AIWorker:
                             last_dbg = float(self._last_debug_ts.get(stream_key) or 0.0)
                             now2 = time.time()
                             if any_fired:
-                                logger.info(f"[AI] Fired events for {stream_key} (det_total={det_total} pass={det_pass} conf_th={conf_th})")
+                                logger.info(f"[AI] Fired events for {stream_key} (det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} best={best_cls}:{best_conf:.2f})")
                                 self._last_debug_ts[stream_key] = now2
                             elif (now2 - last_dbg) >= max(1.0, dbg_every):
                                 self._last_debug_ts[stream_key] = now2
-                                logger.info(f"[AI] {stream_key} analyzed (det_total={det_total} pass={det_pass} conf_th={conf_th})")
+                                logger.info(f"[AI] {stream_key} analyzed (det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} best={best_cls}:{best_conf:.2f})")
                             try:
                                 if (now2 - last_dbg) >= max(1.0, dbg_every):
                                     self._push_event(
@@ -397,7 +409,7 @@ class AIWorker:
                                         ch,
                                         "ai_debug",
                                         "info",
-                                        f"stream={stream_key} det_total={det_total} pass={det_pass} conf_th={conf_th}",
+                                        f"stream={stream_key} det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} best={best_cls}:{best_conf:.2f}",
                                         snapshot_jpg_b64="",
                                     )
                             except Exception:
