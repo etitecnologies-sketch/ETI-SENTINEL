@@ -1376,6 +1376,28 @@ app.post("/collector/automation-rules", async (req, res) => {
       ifAllNorm.push(cond);
     }
 
+    const ifNot = Array.isArray(rawRule.if_not) ? rawRule.if_not : [];
+    const ifNotNorm = [];
+    for (const c of ifNot) {
+      if (!c || typeof c !== "object" || Array.isArray(c)) return res.status(400).json({ error: "rule.if_not invalid" });
+      const cond = {};
+      if (c.event_type !== undefined) cond.event_type = sanitize(c.event_type || "");
+      if (c.device_id !== undefined) cond.device_id = parseInt(c.device_id);
+      if (c.channel !== undefined) cond.channel = parseInt(c.channel);
+      if (c.severity !== undefined) cond.severity = sanitize(c.severity || "");
+      if (c.source !== undefined) cond.source = sanitize(c.source || "");
+      if (cond.event_type !== undefined && !cond.event_type) return res.status(400).json({ error: "rule.if_not.event_type invalid" });
+      if (cond.device_id !== undefined && !(Number.isFinite(cond.device_id) && cond.device_id > 0)) {
+        return res.status(400).json({ error: "rule.if_not.device_id invalid" });
+      }
+      if (cond.channel !== undefined && !(Number.isFinite(cond.channel) && cond.channel >= 0)) {
+        return res.status(400).json({ error: "rule.if_not.channel invalid" });
+      }
+      if (cond.severity !== undefined && !cond.severity) return res.status(400).json({ error: "rule.if_not.severity invalid" });
+      if (cond.source !== undefined && !cond.source) return res.status(400).json({ error: "rule.if_not.source invalid" });
+      ifNotNorm.push(cond);
+    }
+
     const actions = Array.isArray(rawRule.actions) ? rawRule.actions : [];
     if (actions.length === 0) return res.status(400).json({ error: "rule.actions required" });
     const actionsNorm = [];
@@ -1397,6 +1419,7 @@ app.post("/collector/automation-rules", async (req, res) => {
       if_all: ifAllNorm,
       actions: actionsNorm,
     };
+    if (ifNotNorm.length > 0) rule.if_not = ifNotNorm;
     if (cooldownSecondsRaw !== null) rule.cooldown_seconds = cooldownSecondsRaw;
     if (message) rule.message = message;
 
@@ -2165,6 +2188,10 @@ app.post("/push", metricsLimiter, async (req, res) => {
     finalDescription = `${finalEventType} - Canal: ${finalChannel} ${finalDescription}`;
   }
 
+  const isEdgeHeartbeat =
+    (typeof rawEventType === "string" && rawEventType.toLowerCase() === "edge_heartbeat") ||
+    (typeof finalEventType === "string" && finalEventType.toLowerCase() === "edge_heartbeat");
+
   if (!token) {
     console.log("[Push] Requisição sem identificador recebida:", JSON.stringify(body));
     return res.status(401).json({ error: "Identification (Token/SN/MAC) required" });
@@ -2213,7 +2240,7 @@ app.post("/push", metricsLimiter, async (req, res) => {
     `, [hostId, dev.name, dev.id, finalLatency, solar_voltage, battery_voltage, battery_percent, charge_current, load_current]);
 
     // 2. Registrar Eventos
-    if (finalEventType) {
+    if (finalEventType && !isEdgeHeartbeat) {
       await pool.query(`
         INSERT INTO events (device_id, event_type, channel, description, severity, source, raw_event_type, payload)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
@@ -2225,6 +2252,8 @@ app.post("/push", metricsLimiter, async (req, res) => {
       // O Processor (Python) monitora a tabela 'events' e envia para Telegram/WhatsApp
       // garantindo fuso horário correto e formatação padronizada.
       _sendInstantAnalyticsAlerts(dev, finalEventType, finalChannel, finalDescription).catch(() => {});
+    } else if (finalEventType && isEdgeHeartbeat) {
+      console.log(`[Push] Ignorando edge_heartbeat como evento (apenas métrica): ${dev.name}`);
     }
 
     // 3. WebSocket (Realtime)
@@ -2233,7 +2262,7 @@ app.post("/push", metricsLimiter, async (req, res) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: finalEventType ? "EVENT" : "METRIC",
+          type: finalEventType && !isEdgeHeartbeat ? "EVENT" : "METRIC",
           device_id: dev.id,
           client_id: dev.client_id,
           name: dev.name,
@@ -2246,7 +2275,7 @@ app.post("/push", metricsLimiter, async (req, res) => {
             charge_current: charge_current,
             load_current: load_current
           },
-          event: finalEventType ? { type: finalEventType, channel: finalChannel, description: finalDescription } : null,
+          event: finalEventType && !isEdgeHeartbeat ? { type: finalEventType, channel: finalChannel, description: finalDescription } : null,
           time: new Date().toISOString()
         }),
       }).catch(() => {});

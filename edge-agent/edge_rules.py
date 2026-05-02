@@ -68,8 +68,11 @@ class RuleEngine:
             cooldown = float(rule.get("cooldown_seconds") or within)
             cooldown_by = _sanitize(rule.get("cooldown_by") or "")
             if_all = rule.get("if_all") or []
+            if_not = rule.get("if_not") or []
             actions = rule.get("actions") or []
             if not isinstance(if_all, list) or not if_all:
+                continue
+            if not isinstance(if_not, list):
                 continue
             if not isinstance(actions, list) or not actions:
                 continue
@@ -92,6 +95,21 @@ class RuleEngine:
                     ok = False
                     break
                 matched.append(found)
+
+            if ok and if_not:
+                for cond in if_not:
+                    if not isinstance(cond, dict):
+                        ok = False
+                        break
+                    for ev in reversed(self._recent):
+                        ts = float(ev.get("_ts") or 0)
+                        if now - ts > within:
+                            break
+                        if _match_event(ev, cond):
+                            ok = False
+                            break
+                    if not ok:
+                        break
 
             if not ok:
                 continue

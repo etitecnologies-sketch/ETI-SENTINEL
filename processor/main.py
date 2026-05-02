@@ -729,6 +729,9 @@ def check_new_events(cur, conn):
         eid, etype, channel, desc, sev, etime, dname, cid, dtype, mac, sn, ddesc, dloc = ev
         last_event_id = eid
 
+        if (etype or "").lower() == "edge_heartbeat":
+            continue
+
         cooldown_key = f"event:{etype}"
         if (sev or "").lower() != "critical" and is_in_cooldown(dname, cooldown_key):
             continue
