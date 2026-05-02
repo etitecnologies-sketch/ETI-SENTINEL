@@ -412,6 +412,7 @@ async function initDB() {
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS monitor_agent BOOLEAN DEFAULT TRUE",
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS monitor_ping BOOLEAN DEFAULT TRUE",
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS monitor_snmp BOOLEAN DEFAULT FALSE",
+      "ALTER TABLE devices ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN DEFAULT FALSE",
       "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS disk_percent FLOAT DEFAULT 0",
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS mac_address TEXT DEFAULT ''",
       "ALTER TABLE devices ADD COLUMN IF NOT EXISTS serial_number TEXT DEFAULT ''",
@@ -798,7 +799,8 @@ app.post("/devices", auth, async (req, res) => {
     name, description, location, device_type, ip_address, tags, 
     ddns_address, monitor_port, monitor_ping, monitor_agent, notes, client_id,
     snmp_community, snmp_version, ssh_user, ssh_port,
-    mac_address, serial_number
+    mac_address, serial_number,
+    ai_enabled
   } = req.body;
   if (!name) return res.status(400).json({ error: "Name required" });
   const cid = req.user.role === "superadmin" ? (client_id || null) : req.user.client_id;
@@ -807,14 +809,14 @@ app.post("/devices", auth, async (req, res) => {
     const r = await pool.query(`
       INSERT INTO devices (
         name, description, location, token, device_type, ip_address, tags, 
-        ddns_address, monitor_port, monitor_ping, monitor_agent, notes, client_id,
+        ddns_address, monitor_port, monitor_ping, monitor_agent, ai_enabled, notes, client_id,
         snmp_community, snmp_version, ssh_user, ssh_port,
         mac_address, serial_number
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *
     `, [
       name, description||"", location||"", token, device_type||"other", ip_address||"", tags||[], 
-      ddns_address||"", parseInt(monitor_port)||0, monitor_ping!==false, monitor_agent!==false, notes||"", cid,
+      ddns_address||"", parseInt(monitor_port)||0, monitor_ping!==false, monitor_agent!==false, ai_enabled===true, notes||"", cid,
       snmp_community||"public", snmp_version||"2c", ssh_user||"", parseInt(ssh_port)||22,
       mac_address||"", serial_number||""
     ]);
@@ -828,20 +830,21 @@ app.put("/devices/:id", auth, async (req, res) => {
     name, description, location, device_type, ip_address, tags, 
     ddns_address, monitor_port, monitor_ping, monitor_agent, notes,
     snmp_community, snmp_version, ssh_user, ssh_port,
-    mac_address, serial_number, client_id
+    mac_address, serial_number, client_id,
+    ai_enabled
   } = req.body;
   const cid = req.user.role === "superadmin" ? (client_id || null) : req.user.client_id;
   try {
     const r = await pool.query(`
       UPDATE devices SET 
         name=$1, description=$2, location=$3, device_type=$4, ip_address=$5, tags=$6, 
-        ddns_address=$7, monitor_port=$8, monitor_ping=$9, monitor_agent=$10, notes=$11,
-        snmp_community=$12, snmp_version=$13, ssh_user=$14, ssh_port=$15,
-        mac_address=$16, serial_number=$17, client_id=$18
-      WHERE id=$19 RETURNING *
+        ddns_address=$7, monitor_port=$8, monitor_ping=$9, monitor_agent=$10, ai_enabled=$11, notes=$12,
+        snmp_community=$13, snmp_version=$14, ssh_user=$15, ssh_port=$16,
+        mac_address=$17, serial_number=$18, client_id=$19
+      WHERE id=$20 RETURNING *
     `, [
       name, description||"", location||"", device_type||"other", ip_address||"", tags||[], 
-      ddns_address||"", parseInt(monitor_port)||0, monitor_ping!==false, monitor_agent!==false, notes||"",
+      ddns_address||"", parseInt(monitor_port)||0, monitor_ping!==false, monitor_agent!==false, ai_enabled===true, notes||"",
       snmp_community||"public", snmp_version||"2c", ssh_user||"", parseInt(ssh_port)||22,
       mac_address||"", serial_number||"", cid,
       req.params.id
@@ -1072,6 +1075,8 @@ app.get("/collector/rtsp-config", async (req, res) => {
           d.name,
           d.client_id,
           d.token,
+          d.device_type,
+          d.ai_enabled,
           rc.username,
           rc.password_enc,
           CASE
@@ -1083,6 +1088,7 @@ app.get("/collector/rtsp-config", async (req, res) => {
         WHERE ${where}
       )
       SELECT d.device_id, d.name, d.client_id, d.token,
+             d.device_type, d.ai_enabled,
              d.username, d.password_enc, d.streams
       FROM cfg d
       WHERE jsonb_array_length(d.streams) > 0
@@ -1097,6 +1103,8 @@ app.get("/collector/rtsp-config", async (req, res) => {
         name: row.name,
         client_id: row.client_id,
         token: row.token,
+        device_type: row.device_type || "",
+        ai_enabled: row.ai_enabled === true,
         username: row.username,
         password: decOnvif(row.password_enc),
         streams: row.streams || [],
@@ -1134,6 +1142,7 @@ app.get("/collector/devices", async (req, res) => {
         monitor_ping,
         monitor_port,
         device_type,
+        ai_enabled,
         mac_address,
         serial_number,
         hostname,
@@ -1156,6 +1165,7 @@ app.get("/collector/devices", async (req, res) => {
         monitor_ping: row.monitor_ping === true,
         monitor_port: parseInt(row.monitor_port) || 0,
         device_type: row.device_type || "",
+        ai_enabled: row.ai_enabled === true,
         mac_address: row.mac_address || "",
         serial_number: row.serial_number || "",
         hostname: row.hostname || "",

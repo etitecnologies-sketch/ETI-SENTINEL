@@ -299,6 +299,8 @@ class AIWorker:
                         token = _sanitize(cfg.get("token") or "")
                         if did <= 0:
                             continue
+                        if cfg.get("ai_enabled") is False:
+                            continue
                         if not self._allowed_device(did):
                             continue
                         if not self._should_analyze(stream_key, now):

@@ -55,6 +55,10 @@ class StreamWorker:
                     username = device.get("username") or ""
                     password = device.get("password") or ""
                     token = device.get("token") or ""
+                    ai_enabled = device.get("ai_enabled", False)
+                    if isinstance(ai_enabled, str):
+                        ai_enabled = ai_enabled.strip().lower() in {"1", "true", "yes", "on"}
+                    ai_enabled = ai_enabled is True
                     streams = device.get("streams") or []
 
                     for s in streams:
@@ -117,7 +121,8 @@ class StreamWorker:
                                         "channel": channel,
                                         "token": token,
                                         "name": stream_name,
-                                        "transport": transport
+                                        "transport": transport,
+                                        "ai_enabled": ai_enabled,
                                     })
                                     self.manager.mark_failed(stream_key)
                                     continue
@@ -137,7 +142,8 @@ class StreamWorker:
                                         "channel": channel,
                                         "token": token,
                                         "name": stream_name,
-                                        "transport": transport
+                                        "transport": transport,
+                                        "ai_enabled": ai_enabled,
                                     })
                                     self.manager.mark_failed(stream_key)
                                     continue
@@ -147,7 +153,8 @@ class StreamWorker:
                                 "channel": channel,
                                 "token": token,
                                 "name": stream_name,
-                                "transport": transport
+                                "transport": transport,
+                                "ai_enabled": ai_enabled,
                             })
                             self.manager.mark_running(stream_key)
 

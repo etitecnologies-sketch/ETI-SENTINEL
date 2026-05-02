@@ -964,7 +964,7 @@ const EMPTY_DEVICE = {
   ip_address: "", tags: [], snmp_community: "public", snmp_version: "2c",
   ssh_user: "", ssh_port: 22, monitor_ping: true, monitor_snmp: false,
   monitor_agent: true, ddns_address: "", monitor_port: 0, notes: "", client_id: null,
-  mac_address: "", serial_number: "",
+  mac_address: "", serial_number: "", ai_enabled: false,
 };
 
 function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave, onClose }) {
@@ -1134,7 +1134,15 @@ function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave
           <div style={S.fg}><label style={S.label}>Nome *</label><input style={S.input} value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Camera-Entrada" /></div>
           <div style={S.fg}>
             <label style={S.label}>Tipo</label>
-            <select style={S.select} value={form.device_type} onChange={(e) => set("device_type", e.target.value)}>
+            <select
+              style={S.select}
+              value={form.device_type}
+              onChange={(e) => {
+                const v = e.target.value;
+                set("device_type", v);
+                if (!["camera", "dvr", "nvr"].includes(v)) set("ai_enabled", false);
+              }}
+            >
               {DEVICE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
             </select>
           </div>
@@ -1166,6 +1174,12 @@ function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave
               <input type="checkbox" checked={form[k]} onChange={(e) => set(k, e.target.checked)} />{l}
             </label>
           ))}
+          {canVideo && ["camera", "dvr", "nvr"].includes(form.device_type) && (
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#94a3b8", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!form.ai_enabled} onChange={(e) => set("ai_enabled", e.target.checked)} />
+              IA (Analíticos)
+            </label>
+          )}
         </div>
 
         <div style={S.grid(2)}>
