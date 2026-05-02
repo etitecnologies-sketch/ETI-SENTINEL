@@ -59,6 +59,10 @@ class StreamWorker:
                     if isinstance(ai_enabled, str):
                         ai_enabled = ai_enabled.strip().lower() in {"1", "true", "yes", "on"}
                     ai_enabled = ai_enabled is True
+                    device_type = device.get("device_type") or ""
+                    tags = device.get("tags") or []
+                    if not isinstance(tags, list):
+                        tags = []
                     streams = device.get("streams") or []
 
                     for s in streams:
@@ -123,6 +127,8 @@ class StreamWorker:
                                         "name": stream_name,
                                         "transport": transport,
                                         "ai_enabled": ai_enabled,
+                                        "device_type": device_type,
+                                        "tags": tags,
                                     })
                                     self.manager.mark_failed(stream_key)
                                     continue
@@ -144,6 +150,8 @@ class StreamWorker:
                                         "name": stream_name,
                                         "transport": transport,
                                         "ai_enabled": ai_enabled,
+                                        "device_type": device_type,
+                                        "tags": tags,
                                     })
                                     self.manager.mark_failed(stream_key)
                                     continue
@@ -155,6 +163,8 @@ class StreamWorker:
                                 "name": stream_name,
                                 "transport": transport,
                                 "ai_enabled": ai_enabled,
+                                "device_type": device_type,
+                                "tags": tags,
                             })
                             self.manager.mark_running(stream_key)
 

@@ -188,6 +188,13 @@ class PushRelay:
                     ev[kk] = v
                 elif isinstance(v, str) and len(v) <= 200:
                     ev[kk] = sanitize(v)
+                elif lk == "tags" and isinstance(v, list):
+                    tags = []
+                    for t in v:
+                        if isinstance(t, str) and sanitize(t):
+                            tags.append(sanitize(t))
+                    if tags:
+                        ev["tags"] = tags[:20]
                 elif lk == "snapshot_jpg_b64" and isinstance(v, str) and 0 < len(v) <= max(1000, snap_max):
                     ev["snapshot_jpg_b64"] = v.strip()
         except Exception:

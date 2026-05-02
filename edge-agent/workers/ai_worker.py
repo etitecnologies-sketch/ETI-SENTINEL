@@ -186,6 +186,7 @@ class AIWorker:
         severity: str,
         description: str,
         snapshot_jpg_b64: str = "",
+        extra: Optional[Dict[str, Any]] = None,
     ) -> bool:
         url = _sanitize(os.getenv("EDGE_PUSH_URL") or "http://127.0.0.1:8808/api/push")
         if not url:
@@ -201,6 +202,27 @@ class AIWorker:
             payload["description"] = _sanitize(description)[:400]
         if snapshot_jpg_b64:
             payload["snapshot_jpg_b64"] = snapshot_jpg_b64
+        try:
+            if isinstance(extra, dict):
+                for k, v in extra.items():
+                    kk = _sanitize(k)
+                    if not kk:
+                        continue
+                    if kk in payload:
+                        continue
+                    if isinstance(v, (int, float)):
+                        payload[kk] = v
+                    elif isinstance(v, str) and v:
+                        payload[kk] = _sanitize(v)[:200]
+                    elif kk.lower() == "tags" and isinstance(v, list):
+                        tags = []
+                        for t in v:
+                            if isinstance(t, str) and t.strip():
+                                tags.append(t.strip())
+                        if tags:
+                            payload["tags"] = tags[:20]
+        except Exception:
+            pass
         try:
             r = self._sess.post(url, json=payload, headers={"x-event-source": "ai"}, timeout=(3, 8))
             return r.status_code == 200
@@ -298,8 +320,6 @@ class AIWorker:
                         ch = _as_int(cfg.get("channel")) or 0
                         token = _sanitize(cfg.get("token") or "")
                         if did <= 0:
-                            continue
-                        if cfg.get("ai_enabled") is False:
                             continue
                         if not self._allowed_device(did):
                             continue
@@ -405,7 +425,11 @@ class AIWorker:
                                 sev = self._severity_for(cls_name)
                                 desc = f"{cls_name} conf={conf:.2f} stream={stream_key}"
                                 snap = self._encode_snapshot_b64(frame)
-                                ok_push = self._push_event(token, did, ch, ev_type, sev, desc, snapshot_jpg_b64=snap)
+                                extra = {
+                                    "device_type": cfg.get("device_type") or "",
+                                    "tags": cfg.get("tags") or [],
+                                }
+                                ok_push = self._push_event(token, did, ch, ev_type, sev, desc, snapshot_jpg_b64=snap, extra=extra)
                                 any_fired = any_fired or ok_push
                         except Exception:
                             any_fired = False
@@ -429,6 +453,7 @@ class AIWorker:
                                         "info",
                                         f"stream={stream_key} det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} yolo_conf={yolo_conf} best={best_cls}:{best_conf:.2f}",
                                         snapshot_jpg_b64="",
+                                        extra={"device_type": cfg.get("device_type") or "", "tags": cfg.get("tags") or []},
                                     )
                             except Exception:
                                 pass

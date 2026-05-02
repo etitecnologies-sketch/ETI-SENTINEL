@@ -34,6 +34,14 @@ def _match_event(ev: Dict[str, Any], cond: Dict[str, Any]) -> bool:
     src = _sanitize(cond.get("source") or "")
     if src and _sanitize(ev.get("source") or "") != src:
         return False
+    dtype = _sanitize(cond.get("device_type") or "")
+    if dtype and _sanitize(ev.get("device_type") or "") != dtype:
+        return False
+    tag = _sanitize(cond.get("tag") or "")
+    if tag:
+        tags = ev.get("tags") or []
+        if not (isinstance(tags, list) and any(_sanitize(t).lower() == tag.lower() for t in tags)):
+            return False
     return True
 
 

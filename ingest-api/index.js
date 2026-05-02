@@ -1077,6 +1077,7 @@ app.get("/collector/rtsp-config", async (req, res) => {
           d.token,
           d.device_type,
           d.ai_enabled,
+          d.tags,
           rc.username,
           rc.password_enc,
           CASE
@@ -1088,7 +1089,7 @@ app.get("/collector/rtsp-config", async (req, res) => {
         WHERE ${where}
       )
       SELECT d.device_id, d.name, d.client_id, d.token,
-             d.device_type, d.ai_enabled,
+             d.device_type, d.ai_enabled, d.tags,
              d.username, d.password_enc, d.streams
       FROM cfg d
       WHERE jsonb_array_length(d.streams) > 0
@@ -1105,6 +1106,7 @@ app.get("/collector/rtsp-config", async (req, res) => {
         token: row.token,
         device_type: row.device_type || "",
         ai_enabled: row.ai_enabled === true,
+        tags: Array.isArray(row.tags) ? row.tags : [],
         username: row.username,
         password: decOnvif(row.password_enc),
         streams: row.streams || [],
