@@ -254,6 +254,14 @@ class AIWorker:
         except Exception:
             conf_th = 0.6
         try:
+            yolo_conf = float(os.getenv("AI_YOLO_CONF") or 0.15)
+        except Exception:
+            yolo_conf = 0.15
+        try:
+            yolo_iou = float(os.getenv("AI_YOLO_IOU") or 0.45)
+        except Exception:
+            yolo_iou = 0.45
+        try:
             img_size = int(os.getenv("AI_IMAGE_SIZE") or 640)
         except Exception:
             img_size = 640
@@ -333,7 +341,7 @@ class AIWorker:
                             continue
 
                         try:
-                            res = model.predict(frame, imgsz=img_size, verbose=False)
+                            res = model.predict(frame, imgsz=img_size, conf=yolo_conf, iou=yolo_iou, verbose=False)
                         except Exception as e:
                             if debug:
                                 logger.warning(f"[AI] {stream_key} model.predict failed: {e}")
@@ -396,11 +404,11 @@ class AIWorker:
                             last_dbg = float(self._last_debug_ts.get(stream_key) or 0.0)
                             now2 = time.time()
                             if any_fired:
-                                logger.info(f"[AI] Fired events for {stream_key} (det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} best={best_cls}:{best_conf:.2f})")
+                                logger.info(f"[AI] Fired events for {stream_key} (det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} yolo_conf={yolo_conf} best={best_cls}:{best_conf:.2f})")
                                 self._last_debug_ts[stream_key] = now2
                             elif (now2 - last_dbg) >= max(1.0, dbg_every):
                                 self._last_debug_ts[stream_key] = now2
-                                logger.info(f"[AI] {stream_key} analyzed (det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} best={best_cls}:{best_conf:.2f})")
+                                logger.info(f"[AI] {stream_key} analyzed (det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} yolo_conf={yolo_conf} best={best_cls}:{best_conf:.2f})")
                             try:
                                 if (now2 - last_dbg) >= max(1.0, dbg_every):
                                     self._push_event(
@@ -409,7 +417,7 @@ class AIWorker:
                                         ch,
                                         "ai_debug",
                                         "info",
-                                        f"stream={stream_key} det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} best={best_cls}:{best_conf:.2f}",
+                                        f"stream={stream_key} det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} yolo_conf={yolo_conf} best={best_cls}:{best_conf:.2f}",
                                         snapshot_jpg_b64="",
                                     )
                             except Exception:
