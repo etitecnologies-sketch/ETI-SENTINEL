@@ -171,11 +171,7 @@ function Ensure-Services([string]$installDir) {
         "PYTHONUTF8" = "1"
         "PYTHONUNBUFFERED" = "1"
     } @("ETI_SENTINEL_MEDIAMTX")
-    Write-ServiceConfig $svcMtxXml "ETI_SENTINEL_MEDIAMTX" "ETI SENTINEL MediaMTX" "ETI SENTINEL MediaMTX (WebRTC/HLS)" $mtxExe "" $binDir @{
-        "MTX_PATHS_ALL_SOURCE" = "publisher"
-        "MTX_WEBRTC" = "yes"
-        "MTX_HLS" = "yes"
-    } @()
+    Write-ServiceConfig $svcMtxXml "ETI_SENTINEL_MEDIAMTX" "ETI SENTINEL MediaMTX" "ETI SENTINEL MediaMTX (WebRTC/HLS)" $mtxExe "" $binDir @{} @()
 
     try {
         & $svcEdgeExe stop | Out-Null
