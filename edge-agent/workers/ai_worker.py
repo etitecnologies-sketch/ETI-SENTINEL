@@ -104,7 +104,15 @@ class AIWorker:
             return None
         url = self._source_url(stream_key)
         try:
-            cap = cv2.VideoCapture(url)
+            if hasattr(cv2, "CAP_FFMPEG"):
+                cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+            else:
+                cap = cv2.VideoCapture(url)
+            try:
+                if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
         except Exception:
             cap = None
         if not cap or not cap.isOpened():
