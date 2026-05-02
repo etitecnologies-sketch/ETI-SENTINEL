@@ -67,6 +67,7 @@ ping_state          = {}
 last_summary_time   = 0
 last_event_id       = 0
 threshold_stability = {}
+channel_name_cache  = {}
 
 DEVICE_TYPE_ICONS = {
     "server":"🖥️","camera":"📷","router":"🌐","switch":"🔀",
@@ -716,7 +717,7 @@ def check_new_events(cur, conn):
         return
 
     cur.execute("""
-        SELECT e.id, e.event_type, e.channel, e.description, e.severity, e.time,
+        SELECT e.id, e.device_id, e.event_type, e.channel, e.description, e.severity, e.time,
                d.name as device_name, d.client_id, d.device_type, d.mac_address, d.serial_number, d.description, d.location
         FROM events e
         JOIN devices d ON d.id = e.device_id
@@ -724,16 +725,47 @@ def check_new_events(cur, conn):
         ORDER BY e.id ASC
     """, (last_event_id,))
     
+    def _load_channel_names(device_id: int):
+        try:
+            cur.execute("SELECT streams FROM rtsp_configs WHERE device_id=%s LIMIT 1", (int(device_id),))
+            row = cur.fetchone()
+            if not row:
+                return
+            streams = row[0] or []
+            if not isinstance(streams, list):
+                return
+            for s in streams:
+                if not isinstance(s, dict):
+                    continue
+                ch = s.get("channel")
+                nm = s.get("name")
+                try:
+                    ch_i = int(ch)
+                except Exception:
+                    continue
+                name_s = escape_html(str(nm).strip()) if nm else ""
+                channel_name_cache[(int(device_id), int(ch_i))] = name_s
+        except Exception:
+            return
+
+    def _get_channel_name(device_id: int, channel: int) -> str:
+        k = (int(device_id), int(channel))
+        if k in channel_name_cache:
+            return channel_name_cache.get(k) or ""
+        _load_channel_names(int(device_id))
+        return channel_name_cache.get(k) or ""
+
     events = cur.fetchall()
     for ev in events:
-        eid, etype, channel, desc, sev, etime, dname, cid, dtype, mac, sn, ddesc, dloc = ev
+        eid, device_id, etype, channel, desc, sev, etime, dname, cid, dtype, mac, sn, ddesc, dloc = ev
         last_event_id = eid
 
         if (etype or "").lower() == "edge_heartbeat":
             continue
 
+        host_key = f"client:{cid}:dev:{device_id}:ch:{channel}"
         cooldown_key = f"event:{etype}"
-        if (sev or "").lower() != "critical" and is_in_cooldown(dname, cooldown_key):
+        if (sev or "").lower() != "critical" and is_in_cooldown(host_key, cooldown_key):
             continue
         
         # Prepara a mensagem de alerta analítico
@@ -743,6 +775,16 @@ def check_new_events(cur, conn):
         etime_str = etime.astimezone(TIMEZONE_DISPLAY).strftime("%d/%m/%Y %H:%M:%S")
         eddesc = escape_html(ddesc) if ddesc else ""
         edloc = escape_html(dloc) if dloc else ""
+
+        ch_num = 0
+        try:
+            ch_num = int(channel or 0)
+        except Exception:
+            ch_num = 0
+        ch_name = _get_channel_name(int(device_id), int(ch_num)) if ch_num > 0 else ""
+        ch_display = str(ch_num) if ch_num > 0 else "-"
+        if ch_name:
+            ch_display = f"{ch_display} ({ch_name})"
         
         # Ícone baseado na severidade ou tipo
         icon = "🎬"
@@ -760,7 +802,7 @@ def check_new_events(cur, conn):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📷 <b>{edname}</b>\n"
             f"Evento: <b>{etype_display}</b>\n"
-            f"Canal: {channel}\n"
+            f"Canal: {ch_display}\n"
             f"Horário: {etime_str}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📝 {edesc}\n"
@@ -780,7 +822,7 @@ def check_new_events(cur, conn):
 
         send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
         
-        set_cooldown(dname, cooldown_key)
+        set_cooldown(host_key, cooldown_key)
 
 def evaluate_once():
     # Batimento cardíaco com resumo rápido
