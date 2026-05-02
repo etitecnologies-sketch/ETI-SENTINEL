@@ -215,10 +215,12 @@ class PushRelay:
                 "ts": float(now_evt),
                 "event_type": sanitize(ev.get("event_type") or ""),
                 "device_id": ev.get("device_id"),
+                "device_type": sanitize(ev.get("device_type") or ""),
                 "channel": int(ev.get("channel") or 0),
                 "severity": sanitize(ev.get("severity") or ""),
                 "source": sanitize(ev.get("source") or ""),
                 "description": sanitize(ev.get("description") or "")[:200],
+                "tags": ev.get("tags") if isinstance(ev.get("tags"), list) else [],
                 "has_snapshot": bool(has_snap),
                 "snapshot_len": int(snap_len),
             }
