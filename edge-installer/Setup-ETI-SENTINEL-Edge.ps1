@@ -288,6 +288,7 @@ function Ensure-MediaMTX {
         Copy-Item $offlineExe $destBin -Force
         $offlineYml = (Offline-File "mediamtx\\mediamtx.yml")
         if ($offlineYml) { Copy-Item $offlineYml $destBin -Force }
+        Ensure-MediaMTXConfig
         Write-Ok "MediaMTX instalado (offline) em $destBin"
         return
     }
@@ -301,6 +302,7 @@ function Ensure-MediaMTX {
             $yml = Join-Path $tmp "mediamtx.yml"
             if (Test-Path $bin) { Copy-Item $bin $destBin -Force }
             if (Test-Path $yml) { Copy-Item $yml $destBin -Force }
+            Ensure-MediaMTXConfig
             Write-Ok "MediaMTX instalado (offline) em $destBin"
             return
         } catch {
@@ -325,12 +327,26 @@ function Ensure-MediaMTX {
         New-Item -ItemType Directory -Force -Path $destBin | Out-Null
         if (Test-Path $bin) { Copy-Item $bin $destBin -Force }
         if (Test-Path $yml) { Copy-Item $yml $destBin -Force }
+        Ensure-MediaMTXConfig
         Write-Ok "MediaMTX instalado em $destBin"
     } catch {
         Write-Wrn "Não foi possível baixar MediaMTX. O vídeo WebRTC pode falhar."
     } finally {
         Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Ensure-MediaMTXConfig {
+    $ymlPath = Join-Path $installDir "bin\mediamtx.yml"
+    if (!(Test-Path $ymlPath)) { return }
+    try {
+        $lines = Get-Content $ymlPath -ErrorAction SilentlyContinue
+        if (!$lines) { $lines = @() }
+        $lines = $lines | Where-Object { $_ -notmatch '^\s*rtspTransports\s*:' }
+        $lines += "rtspTransports: [tcp]"
+        $txt = ($lines -join "`r`n") + "`r`n"
+        [System.IO.File]::WriteAllText($ymlPath, $txt, (New-Object System.Text.UTF8Encoding($false)))
+    } catch {}
 }
 
 function Ensure-Ffmpeg {
