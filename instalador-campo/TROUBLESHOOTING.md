@@ -27,3 +27,20 @@
 ### 4) Serviços não iniciam
 - Verificar em `services.msc`.
 - Ver logs em `C:\ProgramData\ETI-SENTINEL\.logs`.
+
+### 6) MediaMTX não inicia (erro bind UDP :8000)
+
+Sintoma comum:
+- `ERR listen udp :8000: bind: Only one usage of each socket address...`
+
+Como resolver rápido:
+- Pare o Edge Agent: `Stop-Service ETI_SENTINEL_EDGE_AGENT`
+- Encontre e mate qualquer `mediamtx.exe` que ficou aberto manualmente (porta 8554/8000):
+  - `netstat -ano | findstr ":8554"`
+  - `tasklist /FI "PID eq <PID>"`
+  - `Stop-Process -Id <PID> -Force`
+- Inicie o MediaMTX: `Start-Service ETI_SENTINEL_MEDIAMTX`
+- Inicie o Edge Agent: `Start-Service ETI_SENTINEL_EDGE_AGENT`
+
+Observação:
+- A instalação nova força `protocols: [tcp]` no `mediamtx.yml`, reduzindo conflito em UDP e melhorando estabilidade.

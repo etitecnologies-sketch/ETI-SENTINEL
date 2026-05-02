@@ -277,7 +277,10 @@ function Ensure-Python {
 
 function Ensure-MediaMTX {
     $mtxPath = Join-Path $installDir "bin\mediamtx.exe"
-    if (Test-Path $mtxPath) { return }
+    if (Test-Path $mtxPath) {
+        Ensure-MediaMTXConfig
+        return
+    }
 
     $destBin = Join-Path $installDir "bin"
     New-Item -ItemType Directory -Force -Path $destBin | Out-Null
@@ -342,9 +345,21 @@ function Ensure-MediaMTXConfig {
     try {
         $lines = Get-Content $ymlPath -ErrorAction SilentlyContinue
         if (!$lines) { $lines = @() }
-        $lines = $lines | Where-Object { $_ -notmatch '^\s*rtspTransports\s*:' }
-        $lines += "rtspTransports: [tcp]"
-        $txt = ($lines -join "`r`n") + "`r`n"
+        $out = @()
+        $patched = $false
+        foreach ($ln in $lines) {
+            if ($ln -match '^\s*rtspTransports\s*:') { continue }
+            if ($ln -match '^\s*protocols\s*:') {
+                $out += "protocols: [tcp]"
+                $patched = $true
+                continue
+            }
+            $out += $ln
+        }
+        if (-not $patched) {
+            $out += "protocols: [tcp]"
+        }
+        $txt = ($out -join "`r`n") + "`r`n"
         [System.IO.File]::WriteAllText($ymlPath, $txt, (New-Object System.Text.UTF8Encoding($false)))
     } catch {}
 }
