@@ -166,8 +166,10 @@ function Ensure-Services([string]$installDir) {
     Copy-Item $winsw $svcEdgeExe -Force
     Copy-Item $winsw $svcMtxExe -Force
 
-    Write-ServiceConfig $svcEdgeXml "ETI_SENTINEL_EDGE_AGENT" "ETI SENTINEL Edge Agent" "ETI SENTINEL Edge Agent (24/7)" $venvPy "`"$edgeEntry`"" $edgeDir @{
+    $edgeArgs = ('-u "{0}"' -f $edgeEntry)
+    Write-ServiceConfig $svcEdgeXml "ETI_SENTINEL_EDGE_AGENT" "ETI SENTINEL Edge Agent" "ETI SENTINEL Edge Agent (24/7)" $venvPy $edgeArgs $edgeDir @{
         "PYTHONUTF8" = "1"
+        "PYTHONUNBUFFERED" = "1"
     } @("ETI_SENTINEL_MEDIAMTX")
     Write-ServiceConfig $svcMtxXml "ETI_SENTINEL_MEDIAMTX" "ETI SENTINEL MediaMTX" "ETI SENTINEL MediaMTX (WebRTC/HLS)" $mtxExe "" $binDir @{
         "MTX_PATHS_ALL_SOURCE" = "publisher"
