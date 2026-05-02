@@ -1,6 +1,8 @@
 import base64
 import logging
 import os
+import shutil
+import subprocess
 import time
 from typing import Any, Dict, Optional, Set, Tuple
 
@@ -135,12 +137,18 @@ class AIWorker:
         except Exception:
             pass
 
-    def _encode_snapshot_b64(self, frame: Any) -> str:
+    def _encode_snapshot_b64(self, frame: Any, stream_key: str = "") -> str:
         if not _bool(os.getenv("AI_SEND_SNAPSHOT") or "0"):
             return ""
-        cv2 = self._cv2
-        if cv2 is None or frame is None:
-            return ""
+
+        mode = _sanitize(os.getenv("AI_SNAPSHOT_MODE") or "").strip().lower()
+        if not mode:
+            ff = _sanitize(os.getenv("INTERNAL_FFMPEG_PATH") or "").strip()
+            if ff and (shutil.which(ff) or os.path.exists(ff)):
+                mode = "ffmpeg"
+            else:
+                mode = "opencv"
+
         try:
             max_w = int(os.getenv("AI_SNAPSHOT_MAX_WIDTH") or 640)
         except Exception:
@@ -154,6 +162,22 @@ class AIWorker:
         except Exception:
             max_bytes = 400000
 
+        if mode in {"ffmpeg", "ffmpeg_only"}:
+            return self._encode_snapshot_ffmpeg_b64(stream_key=stream_key, max_w=max_w, max_bytes=max_bytes, quality=q0)
+
+        if mode in {"ffmpeg_fallback", "fallback", "opencv_fallback"}:
+            b64 = self._encode_snapshot_opencv_b64(frame=frame, max_w=max_w, max_bytes=max_bytes, quality=q0)
+            if b64:
+                return b64
+            return self._encode_snapshot_ffmpeg_b64(stream_key=stream_key, max_w=max_w, max_bytes=max_bytes, quality=q0)
+
+        return self._encode_snapshot_opencv_b64(frame=frame, max_w=max_w, max_bytes=max_bytes, quality=q0)
+
+    def _encode_snapshot_opencv_b64(self, frame: Any, max_w: int, max_bytes: int, quality: int) -> str:
+        cv2 = self._cv2
+        if cv2 is None or frame is None:
+            return ""
+
         try:
             h, w = frame.shape[:2]
             if max_w > 0 and w > max_w:
@@ -163,7 +187,7 @@ class AIWorker:
         except Exception:
             pass
 
-        for q in [q0, 60, 45]:
+        for q in [quality, 60, 45]:
             try:
                 ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(q)])
                 if not ok:
@@ -177,6 +201,73 @@ class AIWorker:
             except Exception:
                 continue
         return ""
+
+    def _encode_snapshot_ffmpeg_b64(self, stream_key: str, max_w: int, max_bytes: int, quality: int) -> str:
+        url = self._source_url(stream_key)
+        if not url:
+            return ""
+
+        ffmpeg = _sanitize(os.getenv("INTERNAL_FFMPEG_PATH") or "ffmpeg")
+        ffmpeg_ok = shutil.which(ffmpeg) or os.path.exists(ffmpeg)
+        if not ffmpeg_ok:
+            return ""
+
+        try:
+            timeout_s = float(os.getenv("AI_SNAPSHOT_FFMPEG_TIMEOUT_SECONDS") or 4)
+        except Exception:
+            timeout_s = 4.0
+        try:
+            stimeout_ms = int(os.getenv("AI_SNAPSHOT_FFMPEG_STIMEOUT_MS") or 2000)
+        except Exception:
+            stimeout_ms = 2000
+
+        q = max(2, min(31, int((100 - max(1, min(100, int(quality)))) / 4) + 2))
+        vf = None
+        if max_w and int(max_w) > 0:
+            vf = f"scale=min({int(max_w)}\\,iw):-2"
+
+        cmd = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-rtsp_transport",
+            "tcp",
+            "-stimeout",
+            str(max(1, int(stimeout_ms)) * 1000),
+            "-i",
+            url,
+        ]
+        if vf:
+            cmd += ["-vf", vf]
+        cmd += [
+            "-an",
+            "-sn",
+            "-dn",
+            "-frames:v",
+            "1",
+            "-q:v",
+            str(q),
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "pipe:1",
+        ]
+
+        try:
+            p = subprocess.run(cmd, capture_output=True, timeout=max(1.0, float(timeout_s)))
+            if p.returncode != 0:
+                return ""
+            b = p.stdout or b""
+            if not b:
+                return ""
+            if max_bytes > 0 and len(b) > int(max_bytes):
+                return ""
+            return base64.b64encode(b).decode("ascii")
+        except Exception:
+            return ""
+
 
     def _push_event(
         self,
@@ -501,7 +592,7 @@ class AIWorker:
                                         tags = list(tags) + [gtag]
                                         tagset.add(gtag)
                                 desc = f"{cls_name} conf={float(conf):.2f} stream={stream_key}"
-                                snap = self._encode_snapshot_b64(frame)
+                                snap = self._encode_snapshot_b64(frame, stream_key=stream_key)
                                 extra = {
                                     "device_type": cfg.get("device_type") or "",
                                     "tags": tags,
