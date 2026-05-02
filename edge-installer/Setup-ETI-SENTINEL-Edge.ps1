@@ -67,7 +67,21 @@ function Ensure-MediaMTX {
 }
 
 function Ensure-Ffmpeg {
-    if (Ensure-Command "ffmpeg") { return }
+    $destBin = Join-Path $installDir "bin"
+    $destFfmpeg = Join-Path $destBin "ffmpeg.exe"
+
+    if (Ensure-Command "ffmpeg") {
+        try {
+            New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+            $src = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
+            if ($src -and (Test-Path $src)) {
+                Copy-Item $src $destFfmpeg -Force
+                Write-Ok "ffmpeg disponível (copiado para $destFfmpeg)"
+                return
+            }
+        } catch {}
+        return
+    }
     
     # Tenta via winget primeiro (método oficial e mais limpo)
     if (Ensure-Command "winget") {
@@ -75,7 +89,15 @@ function Ensure-Ffmpeg {
         try {
             & winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements --silent | Out-Null
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            if (Ensure-Command "ffmpeg") { Write-Ok "ffmpeg instalado com sucesso."; return }
+            if (Ensure-Command "ffmpeg") {
+                try {
+                    New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+                    $src = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
+                    if ($src -and (Test-Path $src)) { Copy-Item $src $destFfmpeg -Force }
+                } catch {}
+                Write-Ok "ffmpeg instalado com sucesso."
+                return
+            }
         } catch {}
     }
 
@@ -91,7 +113,6 @@ function Ensure-Ffmpeg {
         Expand-Archive -Path $ffmpegZip -DestinationPath $ffmpegTmp -Force
         $binFolder = Get-ChildItem -Path $ffmpegTmp -Directory -Recurse | Where-Object { $_.Name -eq "bin" } | Select-Object -First 1
         if ($binFolder) {
-            $destBin = Join-Path $installDir "bin"
             New-Item -ItemType Directory -Force -Path $destBin | Out-Null
             Copy-Item (Join-Path $binFolder.FullName "*") $destBin -Force
             # Adiciona ao PATH da sessão atual
