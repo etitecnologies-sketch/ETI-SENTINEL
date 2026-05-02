@@ -242,6 +242,9 @@ class PushRelay:
         if et and et in suppress_list:
             suppress_notify = True
 
+        if et == "edge_heartbeat":
+            suppress_notify = True
+
         state_key = None
         if isinstance(did, int) and did > 0:
             state_key = (int(did), int(ch))
