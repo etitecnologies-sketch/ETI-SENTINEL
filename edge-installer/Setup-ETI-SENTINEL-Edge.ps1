@@ -2,7 +2,8 @@ param(
     [string]$Ingest,
     [string]$CollectorKey,
     [string]$ClientId,
-    [switch]$Update
+    [switch]$Update,
+    [string]$OfflineBundle
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,6 +42,39 @@ if (!(Test-Admin)) {
     }
 }
 
+$script:OfflineRoot = ""
+$script:OfflineTemp = ""
+
+function Resolve-OfflineRoot {
+    $p = ("" + ($OfflineBundle)).Trim()
+    if (!$p) {
+        $p = ("" + ($env:ETI_OFFLINE_BUNDLE)).Trim()
+    }
+    if (!$p) { return "" }
+    $p = $p.Trim('`"').Trim("'")
+    if (!(Test-Path $p)) { throw "OfflineBundle não encontrado: $p" }
+    if ($p.ToLower().EndsWith(".zip")) {
+        $tmp = Join-Path $env:TEMP ("eti-offline-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        Expand-Archive -Path $p -DestinationPath $tmp -Force
+        $script:OfflineTemp = $tmp
+        $script:OfflineRoot = $tmp
+        return $tmp
+    }
+    $script:OfflineRoot = $p
+    return $p
+}
+
+function Offline-File([string]$rel) {
+    $root = $script:OfflineRoot
+    if (!$root) { return "" }
+    $fp = Join-Path $root $rel
+    if (Test-Path $fp) { return $fp }
+    return ""
+}
+
+Resolve-OfflineRoot | Out-Null
+
 function Ensure-Command([string]$name) {
     return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
@@ -50,6 +84,12 @@ function Ensure-WinSW {
     $winsw = Join-Path $destBin "winsw.exe"
     if (Test-Path $winsw) { return $winsw }
     New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+    $offline = (Offline-File "winsw\\winsw.exe")
+    if (!$offline) { $offline = (Offline-File "winsw\\WinSW-x64.exe") }
+    if ($offline) {
+        Copy-Item $offline $winsw -Force
+        return $winsw
+    }
     Write-Inf "Baixando WinSW (Windows Service Wrapper)..."
     $url = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
     try {
@@ -166,6 +206,37 @@ function Ensure-Python {
         $script:PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
         return
     }
+
+    $offlinePy = (Offline-File "python\\python-installer.exe")
+    if (!$offlinePy) {
+        $candidates = @(
+            (Offline-File "python\\python-3.12.10-amd64.exe"),
+            (Offline-File "python\\python-3.12.9-amd64.exe"),
+            (Offline-File "python\\python-3.12.8-amd64.exe")
+        ) | Where-Object { $_ }
+        if ($candidates -and $candidates.Count -gt 0) { $offlinePy = $candidates[0] }
+    }
+    if ($offlinePy) {
+        Write-Inf "Instalando Python via pacote offline..."
+        $pyDir = Join-Path $installDir "python"
+        New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
+        $args = @(
+            "/quiet",
+            "InstallAllUsers=1",
+            "Include_pip=1",
+            "Include_test=0",
+            "PrependPath=0",
+            "TargetDir=$pyDir"
+        )
+        $p = Start-Process -FilePath $offlinePy -ArgumentList $args -Wait -PassThru
+        if ($p.ExitCode -ne 0) { throw "python_install_failed:$($p.ExitCode)" }
+        $pyExe = Join-Path $pyDir "python.exe"
+        if (!(Test-Path $pyExe)) { throw "python_not_found_after_offline_install" }
+        $script:PythonExe = $pyExe
+        $env:Path = "$pyDir;" + $env:Path
+        return
+    }
+
     if (Ensure-Command "winget") {
         Write-Inf "Instalando Python via winget..."
         & winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements | Out-Null
@@ -208,6 +279,37 @@ function Ensure-MediaMTX {
     $mtxPath = Join-Path $installDir "bin\mediamtx.exe"
     if (Test-Path $mtxPath) { return }
 
+    $destBin = Join-Path $installDir "bin"
+    New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+    $offlineExe = (Offline-File "mediamtx\\mediamtx.exe")
+    $offlineZip = (Offline-File "mediamtx\\mediamtx.zip")
+    if (!$offlineZip) { $offlineZip = (Offline-File "mediamtx\\mediamtx_v1.9.0_windows_amd64.zip") }
+    if ($offlineExe) {
+        Copy-Item $offlineExe $destBin -Force
+        $offlineYml = (Offline-File "mediamtx\\mediamtx.yml")
+        if ($offlineYml) { Copy-Item $offlineYml $destBin -Force }
+        Write-Ok "MediaMTX instalado (offline) em $destBin"
+        return
+    }
+    if ($offlineZip) {
+        Write-Inf "Instalando MediaMTX via pacote offline..."
+        $tmp = Join-Path $env:TEMP "mediamtx-install"
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        try {
+            Expand-Archive -Path $offlineZip -DestinationPath $tmp -Force
+            $bin = Join-Path $tmp "mediamtx.exe"
+            $yml = Join-Path $tmp "mediamtx.yml"
+            if (Test-Path $bin) { Copy-Item $bin $destBin -Force }
+            if (Test-Path $yml) { Copy-Item $yml $destBin -Force }
+            Write-Ok "MediaMTX instalado (offline) em $destBin"
+            return
+        } catch {
+            Write-Wrn "Pacote offline do MediaMTX inválido. Tentando download online."
+        } finally {
+            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     Write-Inf "Baixando MediaMTX (Media Server para WebRTC/HLS)..."
     $url = "https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/mediamtx_v1.9.0_windows_amd64.zip"
     $tmp = Join-Path $env:TEMP "mediamtx-install"
@@ -234,6 +336,39 @@ function Ensure-MediaMTX {
 function Ensure-Ffmpeg {
     $destBin = Join-Path $installDir "bin"
     $destFfmpeg = Join-Path $destBin "ffmpeg.exe"
+
+    $offlineFfmpeg = (Offline-File "ffmpeg\\ffmpeg.exe")
+    $offlineFfprobe = (Offline-File "ffmpeg\\ffprobe.exe")
+    $offlineZip = (Offline-File "ffmpeg\\ffmpeg.zip")
+    if (!$offlineZip) { $offlineZip = (Offline-File "ffmpeg\\ffmpeg-release-essentials.zip") }
+    if ($offlineFfmpeg) {
+        New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+        Copy-Item $offlineFfmpeg $destFfmpeg -Force
+        if ($offlineFfprobe) { Copy-Item $offlineFfprobe (Join-Path $destBin "ffprobe.exe") -Force }
+        $env:Path += ";$destBin"
+        Write-Ok "ffmpeg instalado (offline) em $destBin"
+        return
+    }
+    if ($offlineZip) {
+        Write-Inf "Instalando ffmpeg via pacote offline..."
+        $ffmpegTmp = Join-Path $env:TEMP "ffmpeg-install"
+        New-Item -ItemType Directory -Force -Path $ffmpegTmp | Out-Null
+        try {
+            Expand-Archive -Path $offlineZip -DestinationPath $ffmpegTmp -Force
+            $binFolder = Get-ChildItem -Path $ffmpegTmp -Directory -Recurse | Where-Object { $_.Name -eq "bin" } | Select-Object -First 1
+            if ($binFolder) {
+                New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+                Copy-Item (Join-Path $binFolder.FullName "*") $destBin -Force
+                $env:Path += ";$destBin"
+                Write-Ok "ffmpeg instalado (offline) em $destBin"
+                return
+            }
+        } catch {
+            Write-Wrn "Pacote offline do ffmpeg inválido. Tentando métodos online."
+        } finally {
+            Remove-Item $ffmpegTmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 
     if (Ensure-Command "ffmpeg") {
         try {
@@ -465,6 +600,14 @@ function Ensure-Venv([string]$edgeDir) {
         $env:PIP_CACHE_DIR = $cacheDir
     } catch {}
     Write-Inf "Instalando dependências do Edge..."
+    $wheelhouse = Offline-File "wheelhouse"
+    if ($wheelhouse -and (Test-Path $wheelhouse)) {
+        & $py -m pip --version | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "pip não disponível na venv." }
+        & $py -m pip install --no-index --find-links $wheelhouse -r (Join-Path $edgeDir "requirements.txt") | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge (offline)." }
+        return
+    }
     & $py -m pip install --upgrade pip --no-cache-dir | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar/atualizar pip na venv." }
     & $py -m pip install --no-cache-dir -r (Join-Path $edgeDir "requirements.txt") | Out-Null
@@ -590,52 +733,58 @@ try {
     icacls $installDir /grant "SYSTEM:(OI)(CI)F" /T | Out-Null
 } catch {}
 
-Ensure-Python
-Ensure-Ffmpeg
-Ensure-MediaMTX
+try {
+    Ensure-Python
+    Ensure-Ffmpeg
+    Ensure-MediaMTX
 
-$existingEnv = Join-Path $installDir "edge-agent\.env"
-$defaultIngest = (Read-EnvValue $existingEnv "INGEST_API_URL").Trim()
-if (!$defaultIngest) { $defaultIngest = "https://eti-sentinel-production.up.railway.app" }
-$defaultKey = (Read-EnvValue $existingEnv "COLLECTOR_KEY").Trim()
-if (!$defaultKey) { $defaultKey = "etiSENTINEL_collector_2026_etitecnologies" }
-$defaultCid = (Read-EnvValue $existingEnv "CLIENT_ID").Trim()
+    $existingEnv = Join-Path $installDir "edge-agent\.env"
+    $defaultIngest = (Read-EnvValue $existingEnv "INGEST_API_URL").Trim()
+    if (!$defaultIngest) { $defaultIngest = "https://eti-sentinel-production.up.railway.app" }
+    $defaultKey = (Read-EnvValue $existingEnv "COLLECTOR_KEY").Trim()
+    if (!$defaultKey) { $defaultKey = "etiSENTINEL_collector_2026_etitecnologies" }
+    $defaultCid = (Read-EnvValue $existingEnv "CLIENT_ID").Trim()
 
-$ingest = $Ingest.Trim()
-if (!$ingest -and $Update) { $ingest = $defaultIngest }
-if (!$ingest) { $ingest = (Read-Host "INGEST_API_URL (Enter = $defaultIngest)").Trim() }
-if (!$ingest) { $ingest = $defaultIngest }
-$ingest = $ingest.Trim('`').Trim('"').Trim("'").Trim()
-if (!($ingest.StartsWith("http://") -or $ingest.StartsWith("https://"))) { $ingest = "https://$ingest" }
-$ingest = $ingest.TrimEnd("/")
+    $ingest = $Ingest.Trim()
+    if (!$ingest -and $Update) { $ingest = $defaultIngest }
+    if (!$ingest) { $ingest = (Read-Host "INGEST_API_URL (Enter = $defaultIngest)").Trim() }
+    if (!$ingest) { $ingest = $defaultIngest }
+    $ingest = $ingest.Trim('`').Trim('"').Trim("'").Trim()
+    if (!($ingest.StartsWith("http://") -or $ingest.StartsWith("https://"))) { $ingest = "https://$ingest" }
+    $ingest = $ingest.TrimEnd("/")
 
-$key = $CollectorKey.Trim()
-if (!$key -and $Update) { $key = $defaultKey }
-if (!$key) { $key = (Read-Host "COLLECTOR_KEY (Enter = default)").Trim() }
-if (!$key) { $key = $defaultKey }
-$key = $key.Trim('`').Trim('"').Trim("'").Trim()
-if (!$key) { throw "COLLECTOR_KEY é obrigatório." }
+    $key = $CollectorKey.Trim()
+    if (!$key -and $Update) { $key = $defaultKey }
+    if (!$key) { $key = (Read-Host "COLLECTOR_KEY (Enter = default)").Trim() }
+    if (!$key) { $key = $defaultKey }
+    $key = $key.Trim('`').Trim('"').Trim("'").Trim()
+    if (!$key) { throw "COLLECTOR_KEY é obrigatório." }
 
-$cid = $ClientId.Trim()
-if (!$cid -and $Update) { $cid = $defaultCid }
-if (!$cid) { $cid = (Read-Host "CLIENT_ID (opcional)").Trim() }
-$cid = $cid.Trim('`').Trim('"').Trim("'").Trim()
+    $cid = $ClientId.Trim()
+    if (!$cid -and $Update) { $cid = $defaultCid }
+    if (!$cid) { $cid = (Read-Host "CLIENT_ID (opcional)").Trim() }
+    $cid = $cid.Trim('`').Trim('"').Trim("'").Trim()
 
-Download-Repo $installDir
-$edgeDir = Join-Path $installDir "edge-agent"
-Ensure-Env $edgeDir $ingest $key $cid
-Ensure-Ffmpeg
-Ensure-MediaMTX
-Ensure-Venv $edgeDir
-Ensure-Services $installDir
+    Download-Repo $installDir
+    $edgeDir = Join-Path $installDir "edge-agent"
+    Ensure-Env $edgeDir $ingest $key $cid
+    Ensure-Ffmpeg
+    Ensure-MediaMTX
+    Ensure-Venv $edgeDir
+    Ensure-Services $installDir
 
-$py = Join-Path $edgeDir ".venv\Scripts\python.exe"
-$entry = Join-Path $edgeDir "edge_agent.py"
-Write-Inf "Executando health-check (edge_agent.py --check)..."
-& $py $entry --check
-if ($LASTEXITCODE -ne 0) { throw "Health-check falhou. Verifique logs em $installDir\.logs e $edgeDir\.state" }
-Ensure-Icon $installDir
-Ensure-Shortcuts $installDir
+    $py = Join-Path $edgeDir ".venv\Scripts\python.exe"
+    $entry = Join-Path $edgeDir "edge_agent.py"
+    Write-Inf "Executando health-check (edge_agent.py --check)..."
+    & $py $entry --check
+    if ($LASTEXITCODE -ne 0) { throw "Health-check falhou. Verifique logs em $installDir\.logs e $edgeDir\.state" }
+    Ensure-Icon $installDir
+    Ensure-Shortcuts $installDir
 
-Write-Ok "Instalado. Edge iniciado e configurado para iniciar com o Windows."
-Write-Inf "Status: http://127.0.0.1:8808/api/status"
+    Write-Ok "Instalado. Edge iniciado e configurado para iniciar com o Windows."
+    Write-Inf "Status: http://127.0.0.1:8808/api/status"
+} finally {
+    if ($script:OfflineTemp) {
+        try { Remove-Item $script:OfflineTemp -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+    }
+}
