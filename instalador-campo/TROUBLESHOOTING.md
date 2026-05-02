@@ -11,6 +11,11 @@
 - `COLLECTOR_KEY` errada ou rotacionada.
 - Solução: pegar a chave atual no painel (aba `🔑 Edge`) e atualizar o `.env` de cada Edge do cliente.
 
+### 5) Quero atualizar o Edge
+
+- Online: `02-Instalar-Edge-Online.ps1 -Update`
+- Offline: `03-Instalar-Edge-Offline.ps1 -OfflineBundle ... -Update`
+
 ### 2) `Health-check falhou`
 - Validar se `ffmpeg.exe` e `mediamtx.exe` existem em `C:\ProgramData\ETI-SENTINEL\bin`.
 - Em corporativo, usar `-OfflineBundle` com bundle completo.
@@ -22,4 +27,3 @@
 ### 4) Serviços não iniciam
 - Verificar em `services.msc`.
 - Ver logs em `C:\ProgramData\ETI-SENTINEL\.logs`.
-

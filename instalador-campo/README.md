@@ -31,6 +31,26 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .03-Instalar-Edge-Offline.ps1 -OfflineBundle "D:\ETI-BUNDLE.zip"
 ```
 
+## Update (atualização de Edge já instalado)
+
+### Update online
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.02-Instalar-Edge-Online.ps1 -Update
+```
+
+### Update offline
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.03-Instalar-Edge-Offline.ps1 -OfflineBundle "D:\ETI-BUNDLE.zip" -Update
+```
+
+### Observação
+
+- Rotação de `COLLECTOR_KEY` não é “automática” no update: você precisa atualizar o `.env` de cada Edge.
+
 ## Checklist
 
 Use o checklist rápido em [CHECKLIST.md](file:///c:/Users/EZEQUIEL%20LIMA%20GUIDA/Desktop/ETI%20SENTINEL/instalador-campo/CHECKLIST.md).
@@ -38,4 +58,3 @@ Use o checklist rápido em [CHECKLIST.md](file:///c:/Users/EZEQUIEL%20LIMA%20GUI
 ## Observação importante
 
 Ao rotacionar a `COLLECTOR_KEY` do cliente, todos os Edges daquele `CLIENT_ID` precisam ser atualizados.
-
