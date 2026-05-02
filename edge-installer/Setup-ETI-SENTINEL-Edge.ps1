@@ -79,6 +79,50 @@ function Ensure-Command([string]$name) {
     return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
 
+function Test-ZipFile([string]$path) {
+    try {
+        if (!(Test-Path $path)) { return $false }
+        $fs = [System.IO.File]::OpenRead($path)
+        try {
+            $zip = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Read, $false)
+            try {
+                return ($zip.Entries.Count -ge 0)
+            } finally {
+                $zip.Dispose()
+            }
+        } finally {
+            $fs.Dispose()
+        }
+    } catch {
+        return $false
+    }
+}
+
+function Download-File([string]$url, [string]$dest, [switch]$IsZip) {
+    $destDir = Split-Path -Parent $dest
+    if ($destDir) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+    for ($i = 1; $i -le 3; $i++) {
+        try {
+            if (Test-Path $dest) { Remove-Item $dest -Force -ErrorAction SilentlyContinue }
+            if (Ensure-Command "Start-BitsTransfer") {
+                Start-BitsTransfer -Source $url -Destination $dest -ErrorAction Stop
+            } else {
+                Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing -Headers @{"Cache-Control"="no-cache";"Pragma"="no-cache"} -ErrorAction Stop
+            }
+            if (!(Test-Path $dest)) { throw "download_missing" }
+            $len = (Get-Item $dest).Length
+            if ($len -lt 1024) { throw "download_too_small:$len" }
+            if ($IsZip) {
+                if (!(Test-ZipFile $dest)) { throw "zip_invalid" }
+            }
+            return
+        } catch {
+            if ($i -eq 3) { throw }
+            Start-Sleep -Seconds (2 * $i)
+        }
+    }
+}
+
 function Ensure-WinSW {
     $destBin = Join-Path $installDir "bin"
     $winsw = Join-Path $destBin "winsw.exe"
@@ -93,8 +137,7 @@ function Ensure-WinSW {
     Write-Inf "Baixando WinSW (Windows Service Wrapper)..."
     $url = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
     try {
-        Invoke-WebRequest -Uri $url -OutFile $winsw -UseBasicParsing
-        if (!(Test-Path $winsw)) { throw "download_failed" }
+        Download-File $url $winsw
         return $winsw
     } catch {
         throw "Não foi possível baixar WinSW automaticamente. Verifique internet/proxy e tente novamente."
@@ -251,8 +294,7 @@ function Ensure-Python {
     $exe = Join-Path $tmp "python.exe"
     $url = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
     try {
-        Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
-        if (!(Test-Path $exe)) { throw "download_failed" }
+        Download-File $url $exe
         New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
         $args = @(
             "/quiet",
@@ -320,7 +362,7 @@ function Ensure-MediaMTX {
     $zip = Join-Path $tmp "mediamtx.zip"
     
     try {
-        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        Download-File $url $zip -IsZip
         Expand-Archive -Path $zip -DestinationPath $tmp -Force
         $bin = Join-Path $tmp "mediamtx.exe"
         $yml = Join-Path $tmp "mediamtx.yml"
@@ -438,7 +480,7 @@ function Ensure-Ffmpeg {
     New-Item -ItemType Directory -Force -Path $ffmpegTmp | Out-Null
     
     try {
-        Invoke-WebRequest -Uri $ffmpegUrl -OutFile $ffmpegZip -UseBasicParsing
+        Download-File $ffmpegUrl $ffmpegZip -IsZip
         Expand-Archive -Path $ffmpegZip -DestinationPath $ffmpegTmp -Force
         $binFolder = Get-ChildItem -Path $ffmpegTmp -Directory -Recurse | Where-Object { $_.Name -eq "bin" } | Select-Object -First 1
         if ($binFolder) {
@@ -539,7 +581,7 @@ function Download-Repo([string]$destDir) {
     $zip = Join-Path $tmp "main.zip"
     $url = "https://github.com/etitecnologies-sketch/ETI-SENTINEL/archive/refs/heads/main.zip"
     Write-Inf "Baixando ETI-SENTINEL (main.zip)..."
-    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+    Download-File $url $zip -IsZip
     Write-Inf "Extraindo..."
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     $src = Get-ChildItem -Path $tmp -Directory | Where-Object { $_.Name -like "ETI-SENTINEL-*" } | Select-Object -First 1
@@ -620,7 +662,13 @@ function Ensure-Venv([string]$edgeDir) {
         Write-Inf "Criando ambiente virtual..."
         $basePy = $script:PythonExe
         if (!$basePy) { $basePy = "python" }
+        try { Remove-Item $venv -Recurse -Force -ErrorAction SilentlyContinue } catch {}
         & $basePy -m venv $venv | Out-Null
+        if (!(Test-Path $py)) {
+            try { Remove-Item $venv -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+            & $basePy -m venv $venv | Out-Null
+        }
+        if (!(Test-Path $py)) { throw "Falha ao criar venv. Verifique Python instalado e permissões." }
     }
     try {
         $installDir = Split-Path -Parent $edgeDir
@@ -629,17 +677,20 @@ function Ensure-Venv([string]$edgeDir) {
         $env:PIP_CACHE_DIR = $cacheDir
     } catch {}
     Write-Inf "Instalando dependências do Edge..."
+    if (!(Test-Path $py)) { throw "python.exe da venv não encontrado: $py" }
+    $req = Join-Path $edgeDir "requirements.txt"
+    if (!(Test-Path $req)) { throw "requirements.txt não encontrado: $req" }
     $wheelhouse = Offline-File "wheelhouse"
     if ($wheelhouse -and (Test-Path $wheelhouse)) {
         & $py -m pip --version | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "pip não disponível na venv." }
-        & $py -m pip install --no-index --find-links $wheelhouse -r (Join-Path $edgeDir "requirements.txt") | Out-Null
+        & $py -m pip install --no-index --find-links $wheelhouse -r $req | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge (offline)." }
         return
     }
     & $py -m pip install --upgrade pip --no-cache-dir | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar/atualizar pip na venv." }
-    & $py -m pip install --no-cache-dir -r (Join-Path $edgeDir "requirements.txt") | Out-Null
+    & $py -m pip install --no-cache-dir -r $req | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge." }
 }
 
