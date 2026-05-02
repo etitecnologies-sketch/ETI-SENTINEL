@@ -425,10 +425,12 @@ class AIWorker:
                                 sev = self._severity_for(cls_name)
                                 desc = f"{cls_name} conf={conf:.2f} stream={stream_key}"
                                 snap = self._encode_snapshot_b64(frame)
-                                extra = {
-                                    "device_type": cfg.get("device_type") or "",
-                                    "tags": cfg.get("tags") or [],
-                                }
+                                tags = cfg.get("tags") or []
+                                if not isinstance(tags, list):
+                                    tags = []
+                                if cfg.get("ai_enabled") is True and "ai_enabled" not in {str(t).strip().lower() for t in tags if isinstance(t, str)}:
+                                    tags = list(tags) + ["ai_enabled"]
+                                extra = {"device_type": cfg.get("device_type") or "", "tags": tags}
                                 ok_push = self._push_event(token, did, ch, ev_type, sev, desc, snapshot_jpg_b64=snap, extra=extra)
                                 any_fired = any_fired or ok_push
                         except Exception:
@@ -453,7 +455,7 @@ class AIWorker:
                                         "info",
                                         f"stream={stream_key} det_total={det_total} conf_ok={det_conf_ok} class_ok={det_class_ok} pass={det_pass} conf_th={conf_th} yolo_conf={yolo_conf} best={best_cls}:{best_conf:.2f}",
                                         snapshot_jpg_b64="",
-                                        extra={"device_type": cfg.get("device_type") or "", "tags": cfg.get("tags") or []},
+                                        extra={"device_type": cfg.get("device_type") or "", "tags": tags},
                                     )
                             except Exception:
                                 pass

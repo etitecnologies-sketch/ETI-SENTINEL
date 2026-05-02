@@ -48,7 +48,7 @@ def _match_event(ev: Dict[str, Any], cond: Dict[str, Any]) -> bool:
 class RuleEngine:
     def __init__(self) -> None:
         self._recent: List[Dict[str, Any]] = []
-        self._last_fire: Dict[int, float] = {}
+        self._last_fire: Dict[Any, float] = {}
 
     def push_event(self, ev: Dict[str, Any], max_keep: int = 200) -> None:
         now = time.time()
@@ -66,15 +66,12 @@ class RuleEngine:
             rule = r.get("rule") or {}
             within = float(rule.get("within_seconds") or 10)
             cooldown = float(rule.get("cooldown_seconds") or within)
+            cooldown_by = _sanitize(rule.get("cooldown_by") or "")
             if_all = rule.get("if_all") or []
             actions = rule.get("actions") or []
             if not isinstance(if_all, list) or not if_all:
                 continue
             if not isinstance(actions, list) or not actions:
-                continue
-
-            last = float(self._last_fire.get(rid) or 0)
-            if now - last < max(1.0, cooldown):
                 continue
 
             matched: List[Dict[str, Any]] = []
@@ -98,7 +95,22 @@ class RuleEngine:
 
             if not ok:
                 continue
-            self._last_fire[rid] = now
+
+            fire_key: Any = rid
+            if cooldown_by in {"device", "device_id", "per_device"}:
+                did = _as_int(matched[0].get("device_id")) if matched else None
+                if did is not None:
+                    fire_key = (rid, "device_id", int(did))
+            elif cooldown_by in {"device_event", "device_id+event_type", "per_device_event"}:
+                did = _as_int(matched[0].get("device_id")) if matched else None
+                et = _sanitize(matched[0].get("event_type")) if matched else ""
+                if did is not None and et:
+                    fire_key = (rid, "device_event", int(did), et)
+
+            last = float(self._last_fire.get(fire_key) or 0)
+            if now - last < max(1.0, cooldown):
+                continue
+            self._last_fire[fire_key] = now
             out.append((r, matched))
         return out
 
