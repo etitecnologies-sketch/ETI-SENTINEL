@@ -1104,11 +1104,40 @@ function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave
     streams_text: "[]",
   });
   const [rtspLoaded, setRtspLoaded] = useState(false);
+  const [rtspBulk, setRtspBulk] = useState({ open: false, start: 1, end: 32, pattern: "Canal {ch}", pad: 0, overwrite: false });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setOnvifField = (k, v) => setOnvif((o) => ({ ...o, [k]: v }));
   const setRtspField = (k, v) => setRtsp((o) => ({ ...o, [k]: v }));
+
+  const applyRtspBulkNames = () => {
+    try {
+      const arr = JSON.parse(rtsp.streams_text || "[]");
+      if (!Array.isArray(arr)) throw new Error("streams must be an array");
+      const start = Math.max(1, parseInt(rtspBulk.start || 1, 10) || 1);
+      const end = Math.max(start, parseInt(rtspBulk.end || start, 10) || start);
+      const pad = Math.max(0, Math.min(6, parseInt(rtspBulk.pad || 0, 10) || 0));
+      const pattern = String(rtspBulk.pattern || "Canal {ch}");
+      const overwrite = rtspBulk.overwrite === true;
+
+      const out = arr.map((s) => {
+        if (!s || typeof s !== "object" || Array.isArray(s)) return s;
+        const ch = parseInt(s.channel, 10);
+        if (!Number.isFinite(ch) || ch < start || ch > end) return s;
+        const curName = (s.name ?? "");
+        if (!overwrite && String(curName).trim()) return s;
+        const chStr = pad > 0 ? String(ch).padStart(pad, "0") : String(ch);
+        const name = pattern.replaceAll("{ch}", chStr);
+        return { ...s, name };
+      });
+
+      setRtspField("streams_text", JSON.stringify(out, null, 2));
+      setRtspBulk((b) => ({ ...b, open: false }));
+    } catch (e) {
+      setErr("Streams (JSON) inválido para aplicar nomes em lote");
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -1418,6 +1447,11 @@ function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave
             </div>
             <div style={S.fg}>
               <label style={S.label}>Streams (JSON)</label>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -4, marginBottom: 8 }}>
+                <button type="button" style={S.btnSm("ghost")} onClick={() => setRtspBulk((b) => ({ ...b, open: true }))}>
+                  Renomear canais (lote)
+                </button>
+              </div>
               <textarea
                 style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
                 value={rtsp.streams_text}
@@ -1425,6 +1459,55 @@ function DeviceModal({ device, clients, userRole, userClientId, canVideo, onSave
                 placeholder='[{"channel":1,"name":"Canal 1","url":"rtsp://192.168.1.100:554/...","timeout_seconds":8,"interval_seconds":30,"transport":"tcp"}]'
               />
             </div>
+
+            {rtspBulk.open && (
+              <div style={S.modal} onClick={() => setRtspBulk((b) => ({ ...b, open: false }))}>
+                <div style={{ ...S.modalBox, width: 560 }} onClick={(e) => e.stopPropagation()}>
+                  <div style={S.modalTitle}>🧩 Renomear canais (lote)</div>
+                  <div style={{ fontSize: 11, color: "#93a4bf", marginBottom: 12 }}>
+                    Isso só altera o campo `name` dos streams já existentes no JSON. O servidor ignora streams sem `url`.
+                  </div>
+
+                  <div style={S.grid(3)}>
+                    <div style={S.fg}>
+                      <label style={S.label}>Canal início</label>
+                      <input style={S.input} value={rtspBulk.start} onChange={(e) => setRtspBulk((b) => ({ ...b, start: e.target.value }))} placeholder="1" />
+                    </div>
+                    <div style={S.fg}>
+                      <label style={S.label}>Canal fim</label>
+                      <input style={S.input} value={rtspBulk.end} onChange={(e) => setRtspBulk((b) => ({ ...b, end: e.target.value }))} placeholder="32" />
+                    </div>
+                    <div style={S.fg}>
+                      <label style={S.label}>Zero pad (opcional)</label>
+                      <input style={S.input} value={rtspBulk.pad} onChange={(e) => setRtspBulk((b) => ({ ...b, pad: e.target.value }))} placeholder="0" />
+                    </div>
+                  </div>
+
+                  <div style={S.fg}>
+                    <label style={S.label}>Padrão de nome</label>
+                    <input
+                      style={{ ...S.input, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
+                      value={rtspBulk.pattern}
+                      onChange={(e) => setRtspBulk((b) => ({ ...b, pattern: e.target.value }))}
+                      placeholder="Canal {ch}"
+                    />
+                    <div style={{ fontSize: 10, color: "#3a5070", marginTop: 6 }}>
+                      Use `{ch}` no texto (ex: `Camera {ch}` ou `Entrada {ch}`).
+                    </div>
+                  </div>
+
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#94a3b8", cursor: "pointer" }}>
+                    <input type="checkbox" checked={rtspBulk.overwrite} onChange={(e) => setRtspBulk((b) => ({ ...b, overwrite: e.target.checked }))} />
+                    Sobrescrever nomes já preenchidos
+                  </label>
+
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+                    <button style={S.btn("ghost")} onClick={() => setRtspBulk((b) => ({ ...b, open: false }))}>Cancelar</button>
+                    <button style={S.btn("primary")} onClick={applyRtspBulkNames}>Aplicar</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div style={{ background: "rgba(59,158,255,0.06)", border: "1px solid rgba(59,158,255,0.12)", borderRadius: 12, padding: 14, color: "#b8cfe8", fontSize: 12 }}>
