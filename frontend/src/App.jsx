@@ -895,6 +895,8 @@ function ClientsPage() {
   const [userModal, setUserModal] = useState(null);
   const [provision, setProvision] = useState(null);
   const [newUser, setNewUser] = useState({ username: "", password: "", access_level: 1 });
+  const [userErr, setUserErr] = useState("");
+  const [userLoading, setUserLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [hoverId, setHoverId] = useState(null);
 
@@ -909,8 +911,29 @@ function ClientsPage() {
 
   const createUser = async () => {
     if (!newUser.username || !newUser.password) return;
-    await api(`/clients/${userModal}/users`, { method: "POST", body: JSON.stringify(newUser) });
-    setUserModal(null); setNewUser({ username: "", password: "", access_level: 1 });
+    setUserLoading(true);
+    setUserErr("");
+    try {
+      await api(`/clients/${userModal}/users`, { method: "POST", body: JSON.stringify(newUser) });
+      setUserModal(null);
+      setNewUser({ username: "", password: "", access_level: 1 });
+    } catch (e) {
+      setUserErr(e?.error || e?.message || "Erro ao criar acesso");
+    } finally {
+      setUserLoading(false);
+    }
+  };
+
+  const suggestUsername = (client) => {
+    const base = String(client?.name || "cliente").toLowerCase();
+    const slug = base
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 18);
+    const id = client?.id ? String(client.id) : "";
+    return (slug ? `${slug}_${id}` : `cliente_${id}`) || "";
   };
 
   const filtered = clients.filter((c) =>
@@ -975,7 +998,18 @@ function ClientsPage() {
                 <td style={{ ...S.td, border: "none" }}>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button style={S.btnSm()} onClick={() => setModal(c)} title="Editar">✏️</button>
-                    <button style={S.btnSm()} onClick={() => setUserModal(c.id)} title="Criar usuário">👤</button>
+                    <button
+                      style={S.btnSm()}
+                      onClick={() => {
+                        setUserErr("");
+                        setUserLoading(false);
+                        setNewUser({ username: suggestUsername(c), password: "", access_level: 1 });
+                        setUserModal(c.id);
+                      }}
+                      title="Criar usuário"
+                    >
+                      👤
+                    </button>
                     <button style={S.btnSm("danger")} onClick={() => del(c.id)}>🗑️</button>
                   </div>
                 </td>
@@ -1043,8 +1077,34 @@ function ClientsPage() {
         <div style={S.modal} onClick={() => setUserModal(null)}>
           <div style={{ ...S.modalBox, width: 360 }} onClick={(e) => e.stopPropagation()}>
             <div style={S.modalTitle}>👤 Criar Acesso do Cliente</div>
-            <div style={S.fg}><label style={S.label}>Usuário</label><input style={S.input} value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} placeholder="cliente_abc" /></div>
-            <div style={S.fg}><label style={S.label}>Senha</label><input style={S.input} type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} placeholder="••••••••" /></div>
+            <form autoComplete="off">
+              <input style={{ display: "none" }} name="username" autoComplete="username" />
+              <input style={{ display: "none" }} type="password" name="password" autoComplete="current-password" />
+
+              <div style={S.fg}>
+                <label style={S.label}>Usuário</label>
+                <input
+                  style={S.input}
+                  name="client_username"
+                  autoComplete="off"
+                  value={newUser.username}
+                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                  placeholder="cliente_abc"
+                />
+              </div>
+              <div style={S.fg}>
+                <label style={S.label}>Senha</label>
+                <input
+                  style={S.input}
+                  name="client_password"
+                  autoComplete="new-password"
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  placeholder="••••••••"
+                />
+              </div>
+            </form>
             <div style={S.fg}>
               <label style={S.label}>Nível de acesso (RBAC)</label>
               <select
@@ -1057,9 +1117,10 @@ function ClientsPage() {
                 <option value={3}>Nível 3 — Gravações/Exportação (futuro)</option>
               </select>
             </div>
+            {userErr && <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 10 }}>⚠️ {userErr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button style={S.btn("ghost")} onClick={() => setUserModal(null)}>Cancelar</button>
-              <button style={S.btn("primary")} onClick={createUser}>Criar Acesso</button>
+              <button style={S.btn("primary")} onClick={createUser} disabled={userLoading}>{userLoading ? "..." : "Criar Acesso"}</button>
             </div>
           </div>
         </div>

@@ -2073,14 +2073,26 @@ app.delete("/clients/:id", auth, superadmin, async (req, res) => {
 });
 
 app.post("/clients/:id/users", auth, superadmin, async (req, res) => {
-  const { username, password, access_level } = req.body;
-  const lvl = Math.max(1, Math.min(3, parseInt(access_level || 1, 10) || 1));
-  const hash = await bcrypt.hash(password, 10);
-  await pool.query(
-    "INSERT INTO users (username, password_hash, role, access_level, client_id) VALUES ($1,$2,'client',$3,$4)",
-    [username, hash, lvl, req.params.id]
-  );
-  res.json({ ok: true });
+  try {
+    const { username, password, access_level } = req.body || {};
+    const u = String(username || "").trim();
+    const p = String(password || "");
+    if (!u) return res.status(400).json({ error: "username required" });
+    if (!p || p.length < 6) return res.status(400).json({ error: "password too short" });
+    const lvl = Math.max(1, Math.min(3, parseInt(access_level || 1, 10) || 1));
+    const hash = await bcrypt.hash(p, 10);
+    await pool.query(
+      "INSERT INTO users (username, password_hash, role, access_level, client_id) VALUES ($1,$2,'client',$3,$4)",
+      [u, hash, lvl, req.params.id]
+    );
+    res.json({ ok: true, username: u });
+  } catch (e) {
+    if (e && e.code === "23505") {
+      return res.status(409).json({ error: "username already exists" });
+    }
+    console.error("Create client user error:", e);
+    return res.status(500).json({ error: "internal_error" });
+  }
 });
 
 app.get("/clients/:id/stats", auth, superadmin, async (req, res) => {
