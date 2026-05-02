@@ -5,6 +5,7 @@ from pathlib import Path
 
 def find_mediamtx():
     possible_paths = [
+        Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe",
         Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe",
         Path(__file__).resolve().parent.parent.parent / "bin" / "mediamtx.exe",
         Path(__file__).resolve().parent.parent / "bin" / "mediamtx.exe",

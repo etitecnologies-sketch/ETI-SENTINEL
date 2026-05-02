@@ -746,8 +746,11 @@ def check_new_events(cur, conn):
         
         # Ícone baseado na severidade ou tipo
         icon = "🎬"
-        if "pessoa" in etype.lower() or "human" in etype.lower(): icon = "👤"
-        elif "veiculo" in etype.lower() or "car" in etype.lower(): icon = "🚗"
+        et_low = (etype or "").lower()
+        if ("pessoa" in et_low) or ("human" in et_low) or ("person" in et_low):
+            icon = "👤"
+        elif ("veiculo" in et_low) or ("vehicle" in et_low) or ("car" in et_low) or ("truck" in et_low) or ("bus" in et_low):
+            icon = "🚗"
         elif sev.lower() == "critical": icon = "🚨"
 
         tg_tok, tg_cid, cl_email, cl_name, wa_inst, wa_tok, wa_num = get_client_config(cur, cid)

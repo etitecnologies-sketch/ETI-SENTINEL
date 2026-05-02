@@ -44,6 +44,7 @@ class AIWorker:
         self._last_frame_ts: Dict[str, float] = {}
         self._last_event_ts: Dict[Tuple[int, int, str], float] = {}
         self._last_debug_ts: Dict[str, float] = {}
+        self._confirm_state: Dict[Tuple[int, int, str], Dict[str, Any]] = {}
         self._sess = requests.Session()
 
         self._model = None
@@ -248,7 +249,30 @@ class AIWorker:
         safe = "_".join([p for p in safe.split("_") if p])
         return f"{prefix}{safe}{suffix}"
 
+    def _group_for_class(self, cls_name: str) -> str:
+        human = _parse_csv_set(os.getenv("AI_GROUP_HUMAN_CLASSES") or "person")
+        vehicle = _parse_csv_set(os.getenv("AI_GROUP_VEHICLE_CLASSES") or "car,motorcycle,bus,truck")
+        key = cls_name.strip().lower()
+        if key in human:
+            return "human"
+        if key in vehicle:
+            return "vehicle"
+        return ""
+
+    def _event_for(self, cls_name: str) -> str:
+        group = self._group_for_class(cls_name)
+        if group == "human":
+            return "ai_human_detected"
+        if group == "vehicle":
+            return "ai_vehicle_detected"
+        return self._class_to_event(cls_name)
+
     def _severity_for(self, cls_name: str) -> str:
+        group = self._group_for_class(cls_name)
+        if group == "human":
+            return "warn"
+        if group == "vehicle":
+            return "info"
         raw = _sanitize(os.getenv("AI_SEVERITY_MAP") or "person=warn,car=info,motorcycle=info,bus=info,truck=info")
         for part in raw.split(","):
             if "=" not in part:
@@ -257,6 +281,34 @@ class AIWorker:
             if k.strip().lower() == cls_name.strip().lower():
                 return v.strip().lower() or "info"
         return "info"
+
+    def _confirm_ok(self, device_id: int, channel: int, key: str, now: float) -> bool:
+        try:
+            need = int(os.getenv("AI_CONFIRM_FRAMES") or 2)
+        except Exception:
+            need = 2
+        try:
+            win = float(os.getenv("AI_CONFIRM_WINDOW_SECONDS") or 2.0)
+        except Exception:
+            win = 2.0
+        need = max(1, int(need))
+        win = max(0.2, float(win))
+
+        k = (int(device_id), int(channel), key)
+        st = self._confirm_state.get(k)
+        if not st:
+            self._confirm_state[k] = {"first_ts": now, "count": 1}
+            return need <= 1
+        first_ts = float(st.get("first_ts") or 0.0)
+        if first_ts and (now - first_ts) > win:
+            self._confirm_state[k] = {"first_ts": now, "count": 1}
+            return need <= 1
+        st["count"] = int(st.get("count") or 0) + 1
+        self._confirm_state[k] = st
+        if int(st["count"]) >= need:
+            self._confirm_state.pop(k, None)
+            return True
+        return False
 
     def _allowed_device(self, device_id: int) -> bool:
         allowed = _parse_csv_set(os.getenv("AI_DEVICE_IDS") or "")
@@ -391,6 +443,7 @@ class AIWorker:
                         best_cls = ""
                         det_conf_ok = 0
                         det_class_ok = 0
+                        best_by_event: Dict[str, Tuple[float, str]] = {}
                         try:
                             for b in boxes:
                                 det_total += 1
@@ -418,23 +471,47 @@ class AIWorker:
                                     continue
                                 det_class_ok += 1
                                 det_pass += 1
-                                now_evt = time.time()
-                                if not self._cooldown_ok(did, ch, cls_name.lower(), now_evt):
-                                    continue
-                                ev_type = self._class_to_event(cls_name)
-                                sev = self._severity_for(cls_name)
-                                desc = f"{cls_name} conf={conf:.2f} stream={stream_key}"
-                                snap = self._encode_snapshot_b64(frame)
-                                tags = cfg.get("tags") or []
-                                if not isinstance(tags, list):
-                                    tags = []
-                                if cfg.get("ai_enabled") is True and "ai_enabled" not in {str(t).strip().lower() for t in tags if isinstance(t, str)}:
-                                    tags = list(tags) + ["ai_enabled"]
-                                extra = {"device_type": cfg.get("device_type") or "", "tags": tags}
-                                ok_push = self._push_event(token, did, ch, ev_type, sev, desc, snapshot_jpg_b64=snap, extra=extra)
-                                any_fired = any_fired or ok_push
+                                ev_type = self._event_for(cls_name)
+                                prev = best_by_event.get(ev_type)
+                                if prev is None or conf > float(prev[0]):
+                                    best_by_event[ev_type] = (float(conf), cls_name)
                         except Exception:
                             any_fired = False
+
+                        if best_by_event:
+                            tags = cfg.get("tags") or []
+                            if not isinstance(tags, list):
+                                tags = []
+                            tagset = {str(t).strip().lower() for t in tags if isinstance(t, str)}
+                            if cfg.get("ai_enabled") is True and "ai_enabled" not in tagset:
+                                tags = list(tags) + ["ai_enabled"]
+
+                            for ev_type, (conf, cls_name) in best_by_event.items():
+                                now_evt = time.time()
+                                cooldown_key = ev_type.strip().lower()
+                                if not self._confirm_ok(did, ch, cooldown_key, now_evt):
+                                    continue
+                                if not self._cooldown_ok(did, ch, cooldown_key, now_evt):
+                                    continue
+                                sev = self._severity_for(cls_name)
+                                grp = self._group_for_class(cls_name)
+                                if grp:
+                                    gtag = f"ai_{grp}".lower()
+                                    if gtag not in tagset:
+                                        tags = list(tags) + [gtag]
+                                        tagset.add(gtag)
+                                desc = f"{cls_name} conf={float(conf):.2f} stream={stream_key}"
+                                snap = self._encode_snapshot_b64(frame)
+                                extra = {
+                                    "device_type": cfg.get("device_type") or "",
+                                    "tags": tags,
+                                    "ai_class": cls_name,
+                                    "ai_group": grp,
+                                    "ai_conf": float(conf),
+                                    "ai_stream": stream_key,
+                                }
+                                ok_push = self._push_event(token, did, ch, ev_type, sev, desc, snapshot_jpg_b64=snap, extra=extra)
+                                any_fired = any_fired or ok_push
 
                         if debug:
                             last_dbg = float(self._last_debug_ts.get(stream_key) or 0.0)

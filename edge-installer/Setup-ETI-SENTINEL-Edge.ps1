@@ -26,17 +26,182 @@ function Test-Admin {
     } catch { return $false }
 }
 
+if (!(Test-Admin)) {
+    Write-Wrn "Este instalador precisa ser executado como Administrador para garantir boot sem logon e recuperação automática."
+    $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
+    if ($Ingest) { $argList += @("-Ingest", $Ingest) }
+    if ($CollectorKey) { $argList += @("-CollectorKey", $CollectorKey) }
+    if ($ClientId) { $argList += @("-ClientId", $ClientId) }
+    if ($Update) { $argList += "-Update" }
+    try {
+        Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $argList | Out-Null
+        exit 0
+    } catch {
+        throw "Falha ao elevar privilégios. Reexecute como Administrador."
+    }
+}
+
 function Ensure-Command([string]$name) {
     return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
 
+function Ensure-WinSW {
+    $destBin = Join-Path $installDir "bin"
+    $winsw = Join-Path $destBin "winsw.exe"
+    if (Test-Path $winsw) { return $winsw }
+    New-Item -ItemType Directory -Force -Path $destBin | Out-Null
+    Write-Inf "Baixando WinSW (Windows Service Wrapper)..."
+    $url = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $winsw -UseBasicParsing
+        if (!(Test-Path $winsw)) { throw "download_failed" }
+        return $winsw
+    } catch {
+        throw "Não foi possível baixar WinSW automaticamente. Verifique internet/proxy e tente novamente."
+    }
+}
+
+function Write-ServiceConfig([string]$xmlPath, [string]$id, [string]$name, [string]$description, [string]$exe, [string]$args, [string]$workDir, [hashtable]$envMap, [string[]]$depends) {
+    $logDir = Join-Path $installDir ".logs"
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    $envLines = ""
+    if ($envMap) {
+        foreach ($k in $envMap.Keys) {
+            $kk = [Security.SecurityElement]::Escape([string]$k)
+            $vv = [Security.SecurityElement]::Escape([string]$envMap[$k])
+            $envLines += "  <env name=`"$kk`" value=`"$vv`" />`r`n"
+        }
+    }
+    $depLines = ""
+    if ($depends) {
+        foreach ($d in $depends) {
+            $dd = [Security.SecurityElement]::Escape([string]$d)
+            if ($dd) { $depLines += "  <depend>$dd</depend>`r`n" }
+        }
+    }
+    $exeEsc = [Security.SecurityElement]::Escape($exe)
+    $argsEsc = [Security.SecurityElement]::Escape($args)
+    $workEsc = [Security.SecurityElement]::Escape($workDir)
+    $idEsc = [Security.SecurityElement]::Escape($id)
+    $nameEsc = [Security.SecurityElement]::Escape($name)
+    $descEsc = [Security.SecurityElement]::Escape($description)
+    $logEsc = [Security.SecurityElement]::Escape($logDir)
+
+    $xml = @"
+<service>
+  <id>$idEsc</id>
+  <name>$nameEsc</name>
+  <description>$descEsc</description>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <logpath>$logEsc</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10485760</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+$envLines$depLines  <executable>$exeEsc</executable>
+  <arguments>$argsEsc</arguments>
+  <workingdirectory>$workEsc</workingdirectory>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="2 min" />
+</service>
+"@
+    [System.IO.File]::WriteAllText($xmlPath, $xml, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Ensure-Services([string]$installDir) {
+    $edgeDir = Join-Path $installDir "edge-agent"
+    $venvPy = Join-Path $edgeDir ".venv\Scripts\python.exe"
+    $edgeEntry = Join-Path $edgeDir "edge_agent.py"
+    $binDir = Join-Path $installDir "bin"
+    $mtxExe = Join-Path $binDir "mediamtx.exe"
+
+    $winsw = Ensure-WinSW
+    $svcEdgeExe = Join-Path $binDir "ETI_SENTINEL_EDGE_AGENT.exe"
+    $svcEdgeXml = Join-Path $binDir "ETI_SENTINEL_EDGE_AGENT.xml"
+    $svcMtxExe = Join-Path $binDir "ETI_SENTINEL_MEDIAMTX.exe"
+    $svcMtxXml = Join-Path $binDir "ETI_SENTINEL_MEDIAMTX.xml"
+
+    Copy-Item $winsw $svcEdgeExe -Force
+    Copy-Item $winsw $svcMtxExe -Force
+
+    Write-ServiceConfig $svcEdgeXml "ETI_SENTINEL_EDGE_AGENT" "ETI SENTINEL Edge Agent" "ETI SENTINEL Edge Agent (24/7)" $venvPy "`"$edgeEntry`"" $edgeDir @{
+        "PYTHONUTF8" = "1"
+    } @("ETI_SENTINEL_MEDIAMTX")
+    Write-ServiceConfig $svcMtxXml "ETI_SENTINEL_MEDIAMTX" "ETI SENTINEL MediaMTX" "ETI SENTINEL MediaMTX (WebRTC/HLS)" $mtxExe "" $binDir @{
+        "MTX_PATHS_ALL_SOURCE" = "publisher"
+        "MTX_WEBRTC" = "yes"
+        "MTX_HLS" = "yes"
+    } @()
+
+    try {
+        & $svcEdgeExe stop | Out-Null
+    } catch {}
+    try {
+        & $svcMtxExe stop | Out-Null
+    } catch {}
+    try {
+        & $svcEdgeExe uninstall | Out-Null
+    } catch {}
+    try {
+        & $svcMtxExe uninstall | Out-Null
+    } catch {}
+
+    Write-Inf "Instalando serviços Windows (boot sem logon + auto-restart)..."
+
+    try {
+        Get-ScheduledTask -TaskName "ETI_SENTINEL_*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+    } catch {}
+
+    & $svcMtxExe install | Out-Null
+    & $svcEdgeExe install | Out-Null
+    & $svcMtxExe start | Out-Null
+    & $svcEdgeExe start | Out-Null
+}
+
 function Ensure-Python {
-    if (Ensure-Command "python") { return }
-    if (!(Ensure-Command "winget")) { throw "Python não encontrado e winget não disponível." }
-    Write-Inf "Instalando Python via winget..."
-    & winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements | Out-Null
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-    if (!(Ensure-Command "python")) { throw "Falha ao instalar Python via winget." }
+    if (Ensure-Command "python") {
+        $script:PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+        return
+    }
+    if (Ensure-Command "winget") {
+        Write-Inf "Instalando Python via winget..."
+        & winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements | Out-Null
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        if (!(Ensure-Command "python")) { throw "Falha ao instalar Python via winget." }
+        $script:PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+        return
+    }
+
+    Write-Inf "Python não encontrado. Baixando instalador oficial..."
+    $pyDir = Join-Path $installDir "python"
+    $tmp = Join-Path $env:TEMP ("python-installer-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $exe = Join-Path $tmp "python.exe"
+    $url = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+        if (!(Test-Path $exe)) { throw "download_failed" }
+        New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
+        $args = @(
+            "/quiet",
+            "InstallAllUsers=1",
+            "Include_pip=1",
+            "Include_test=0",
+            "PrependPath=0",
+            "TargetDir=$pyDir"
+        )
+        $p = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+        if ($p.ExitCode -ne 0) { throw "python_install_failed:$($p.ExitCode)" }
+        $pyExe = Join-Path $pyDir "python.exe"
+        if (!(Test-Path $pyExe)) { throw "python_not_found_after_install" }
+        $script:PythonExe = $pyExe
+        $env:Path = "$pyDir;" + $env:Path
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Ensure-MediaMTX {
@@ -140,6 +305,20 @@ function Read-EnvValue([string]$envPath, [string]$key) {
 }
 
 function Stop-EdgeRuntime([string]$rootDir) {
+    try {
+        foreach ($sid in @("ETI_SENTINEL_EDGE_AGENT", "ETI_SENTINEL_MEDIAMTX")) {
+            try { sc.exe stop $sid | Out-Null } catch {}
+        }
+    } catch {}
+
+    try {
+        $bin = Join-Path $rootDir "bin"
+        $sx1 = Join-Path $bin "ETI_SENTINEL_EDGE_AGENT.exe"
+        $sx2 = Join-Path $bin "ETI_SENTINEL_MEDIAMTX.exe"
+        if (Test-Path $sx1) { try { & $sx1 stop | Out-Null } catch {} }
+        if (Test-Path $sx2) { try { & $sx2 stop | Out-Null } catch {} }
+    } catch {}
+
     $taskName = "ETI_SENTINEL_EDGE"
     try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {}
     try { Disable-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Out-Null } catch {}
@@ -248,7 +427,7 @@ function Ensure-Env([string]$edgeDir, [string]$ingest, [string]$key, [string]$ci
     }
     $lines = @()
     if (Test-Path $envPath) { $lines = Get-Content $envPath -ErrorAction SilentlyContinue }
-    $lines = $lines | Where-Object { $_ -notmatch '^(INGEST_API_URL|COLLECTOR_KEY|CLIENT_ID|ENABLE_STREAMING|ENABLE_RTSP_MONITOR|AGENT_API_BIND|AGENT_API_PORT|EDGE_USE_PYTHONW|EDGE_EVENT_DEDUPE_SECONDS|EDGE_VIDEOLOSS_CONFIRM_SECONDS|EDGE_RECOVERY_CONFIRM_SECONDS|EDGE_VIDEOLOSS_MIN_SECONDS|EDGE_NOTIFY_RECOVERY|EDGE_SUPPRESS_EVENT_TYPES|STREAM_RESTART_COOLDOWN_SECONDS|STREAM_MAX_RETRIES|STREAM_RETRY_MAX_BACKOFF_SECONDS)=' }
+    $lines = $lines | Where-Object { $_ -notmatch '^(INGEST_API_URL|COLLECTOR_KEY|CLIENT_ID|ENABLE_STREAMING|ENABLE_RTSP_MONITOR|AGENT_API_BIND|AGENT_API_PORT|EDGE_USE_PYTHONW|EDGE_START_MEDIAMTX|EDGE_EVENT_DEDUPE_SECONDS|EDGE_VIDEOLOSS_CONFIRM_SECONDS|EDGE_RECOVERY_CONFIRM_SECONDS|EDGE_VIDEOLOSS_MIN_SECONDS|EDGE_NOTIFY_RECOVERY|EDGE_SUPPRESS_EVENT_TYPES|STREAM_RESTART_COOLDOWN_SECONDS|STREAM_MAX_RETRIES|STREAM_RETRY_MAX_BACKOFF_SECONDS)=' }
     $lines += "INGEST_API_URL=$ingest"
     $lines += "COLLECTOR_KEY=$key"
     if ($cid) { $lines += "CLIENT_ID=$cid" }
@@ -256,7 +435,8 @@ function Ensure-Env([string]$edgeDir, [string]$ingest, [string]$key, [string]$ci
     $lines += "ENABLE_RTSP_MONITOR=0"
     $lines += "AGENT_API_BIND=127.0.0.1"
     $lines += "AGENT_API_PORT=8808"
-    $lines += "EDGE_USE_PYTHONW=1"
+    $lines += "EDGE_USE_PYTHONW=0"
+    $lines += "EDGE_START_MEDIAMTX=0"
     $lines += "EDGE_EVENT_DEDUPE_SECONDS=600"
     $lines += "EDGE_VIDEOLOSS_CONFIRM_SECONDS=15"
     $lines += "EDGE_RECOVERY_CONFIRM_SECONDS=10"
@@ -274,7 +454,9 @@ function Ensure-Venv([string]$edgeDir) {
     $py = Join-Path $venv "Scripts\python.exe"
     if (!(Test-Path $py)) {
         Write-Inf "Criando ambiente virtual..."
-        & python -m venv $venv | Out-Null
+        $basePy = $script:PythonExe
+        if (!$basePy) { $basePy = "python" }
+        & $basePy -m venv $venv | Out-Null
     }
     try {
         $installDir = Split-Path -Parent $edgeDir
@@ -387,8 +569,26 @@ function Ensure-Task([string]$installDir) {
     Start-ScheduledTask -TaskName $taskName
 }
 
-$installDir = Join-Path $env:LOCALAPPDATA "ETI-SENTINEL"
+$installDirUser = Join-Path $env:LOCALAPPDATA "ETI-SENTINEL"
+$installDir = Join-Path $env:ProgramData "ETI-SENTINEL"
+if ((Test-Path $installDirUser) -and !(Test-Path $installDir)) {
+    try {
+        Write-Inf "Migrando instalação antiga para ProgramData..."
+        Move-Item -Path $installDirUser -Destination $installDir -Force
+    } catch {
+        try {
+            New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+            Copy-Item -Path (Join-Path $installDirUser "*") -Destination $installDir -Recurse -Force
+            Remove-Item $installDirUser -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+}
 Write-Inf "Instalação em: $installDir"
+
+try {
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+    icacls $installDir /grant "SYSTEM:(OI)(CI)F" /T | Out-Null
+} catch {}
 
 Ensure-Python
 Ensure-Ffmpeg
@@ -427,7 +627,13 @@ Ensure-Env $edgeDir $ingest $key $cid
 Ensure-Ffmpeg
 Ensure-MediaMTX
 Ensure-Venv $edgeDir
-Ensure-Task $installDir
+Ensure-Services $installDir
+
+$py = Join-Path $edgeDir ".venv\Scripts\python.exe"
+$entry = Join-Path $edgeDir "edge_agent.py"
+Write-Inf "Executando health-check (edge_agent.py --check)..."
+& $py $entry --check
+if ($LASTEXITCODE -ne 0) { throw "Health-check falhou. Verifique logs em $installDir\.logs e $edgeDir\.state" }
 Ensure-Icon $installDir
 Ensure-Shortcuts $installDir
 

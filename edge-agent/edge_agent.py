@@ -181,14 +181,23 @@ def run_check(here: Path, env: dict) -> int:
     mtx_bin = None
     possible_mtx = [
         here.parent / "bin" / "mediamtx.exe",
+        Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe",
         Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe",
-        here / "mediamtx.exe"
+        here / "mediamtx.exe",
     ]
     for p in possible_mtx:
         if p.exists():
             mtx_bin = p
             break
     print(f"mediamtx: {'OK (' + str(mtx_bin) + ')' if mtx_bin else 'NÃO ENCONTRADO'}")
+
+    enable_streaming = _bool(env.get("ENABLE_STREAMING", "1"))
+    if enable_streaming and not ffmpeg_path:
+        print("ERRO: ffmpeg é obrigatório quando ENABLE_STREAMING=1")
+        return 1
+    if enable_streaming and not mtx_bin:
+        print("ERRO: mediamtx é obrigatório quando ENABLE_STREAMING=1")
+        return 1
 
     # Exporta os caminhos encontrados para serem usados no main()
     os.environ["INTERNAL_FFMPEG_PATH"] = ffmpeg_path or "ffmpeg"
@@ -263,13 +272,13 @@ def main() -> None:
     env = os.environ.copy()
 
     # Executa o diagnóstico interno antes de subir os serviços para mapear os binários
-    run_check(here, env)
+    check_rc = run_check(here, env)
     
     ffmpeg_exe = os.environ.get("INTERNAL_FFMPEG_PATH", "ffmpeg")
     mtx_exe = os.environ.get("INTERNAL_MEDIAMTX_PATH", "")
 
     if "--check" in sys.argv or "check" in sys.argv:
-        return
+        raise SystemExit(int(check_rc))
 
     if os.name == "nt":
         try:
@@ -300,6 +309,7 @@ def main() -> None:
     enable_api = _bool(env.get("ENABLE_AGENT_API", "1"))
     enable_tray = _bool(env.get("ENABLE_TRAY", "0"))
     enable_recording = _bool(env.get("ENABLE_RECORDING", "0"))
+    manage_mediamtx = _bool(env.get("EDGE_START_MEDIAMTX", "1"))
 
     _cleanup_orphans(here, env)
 
@@ -382,7 +392,7 @@ def main() -> None:
             except Exception:
                 pass
 
-            if mtx_exe:
+            if manage_mediamtx and mtx_exe:
                 proc = start_mediamtx(mtx_exe)
                 if proc:
                     print(f"[INFO] MediaMTX (WebRTC/HLS) iniciado a partir de: {mtx_exe}")

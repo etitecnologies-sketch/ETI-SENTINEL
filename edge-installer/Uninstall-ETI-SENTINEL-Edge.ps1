@@ -4,8 +4,25 @@ function Write-Ok([string]$m) { Write-Host "[OK]  $m" -ForegroundColor Green }
 function Write-Inf([string]$m) { Write-Host "[INFO] $m" -ForegroundColor Cyan }
 function Write-Wrn([string]$m) { Write-Host "[WARN] $m" -ForegroundColor Yellow }
 
-$installDir = Join-Path $env:LOCALAPPDATA "ETI-SENTINEL"
+$installDirUser = Join-Path $env:LOCALAPPDATA "ETI-SENTINEL"
+$installDir = Join-Path $env:ProgramData "ETI-SENTINEL"
 $taskName = "ETI_SENTINEL_EDGE"
+
+try {
+    foreach ($sid in @("ETI_SENTINEL_EDGE_AGENT", "ETI_SENTINEL_MEDIAMTX")) {
+        try { sc.exe stop $sid | Out-Null } catch {}
+    }
+} catch {}
+
+try {
+    $binDir = Join-Path $installDir "bin"
+    $sx1 = Join-Path $binDir "ETI_SENTINEL_EDGE_AGENT.exe"
+    $sx2 = Join-Path $binDir "ETI_SENTINEL_MEDIAMTX.exe"
+    if (Test-Path $sx1) { try { & $sx1 stop | Out-Null } catch {} }
+    if (Test-Path $sx2) { try { & $sx2 stop | Out-Null } catch {} }
+    if (Test-Path $sx1) { try { & $sx1 uninstall | Out-Null } catch {} }
+    if (Test-Path $sx2) { try { & $sx2 uninstall | Out-Null } catch {} }
+} catch {}
 
 try {
     Get-ScheduledTask -TaskName "ETI_SENTINEL_*" -ErrorAction SilentlyContinue |
@@ -33,6 +50,18 @@ if (Test-Path $installDir) {
     } else {
         Write-Wrn "Pasta mantida."
     }
+}
+
+if ((Test-Path $installDirUser) -and ($installDirUser -ne $installDir)) {
+    try {
+        $ans2 = (Read-Host "Remover pasta antiga $installDirUser ? (S/N)").Trim().ToUpper()
+        if ($ans2 -eq "S") {
+            Remove-Item $installDirUser -Recurse -Force
+            Write-Ok "Pasta antiga removida."
+        } else {
+            Write-Wrn "Pasta antiga mantida."
+        }
+    } catch {}
 }
 
 Write-Ok "Desinstalação concluída."
