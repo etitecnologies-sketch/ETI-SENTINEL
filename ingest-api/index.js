@@ -275,7 +275,10 @@ async function initDB() {
           status TEXT DEFAULT 'active', telegram_token TEXT DEFAULT '',
           telegram_chat_id TEXT DEFAULT '', alert_email TEXT DEFAULT '',
           wa_instance TEXT DEFAULT '', wa_token TEXT DEFAULT '', wa_number TEXT DEFAULT '',
-          notes TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT NOW()
+          notes TEXT DEFAULT '',
+          collector_key_hash TEXT DEFAULT '',
+          collector_key_rotated_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE TABLE IF NOT EXISTS users (
           id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
@@ -440,6 +443,8 @@ async function initDB() {
       "ALTER TABLE clients ADD COLUMN IF NOT EXISTS wa_token TEXT DEFAULT ''",
       "ALTER TABLE clients ADD COLUMN IF NOT EXISTS wa_number TEXT DEFAULT ''",
       "ALTER TABLE clients ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''",
+      "ALTER TABLE clients ADD COLUMN IF NOT EXISTS collector_key_hash TEXT DEFAULT ''",
+      "ALTER TABLE clients ADD COLUMN IF NOT EXISTS collector_key_rotated_at TIMESTAMPTZ",
       "ALTER TABLE solar_inverters ADD COLUMN IF NOT EXISTS saj_user TEXT DEFAULT ''",
       "ALTER TABLE solar_inverters ADD COLUMN IF NOT EXISTS saj_pass TEXT DEFAULT ''",
       "ALTER TABLE solar_inverters ADD COLUMN IF NOT EXISTS saj_plant_id TEXT DEFAULT ''",
@@ -519,6 +524,48 @@ initDB();
 const JWT_SECRET = process.env.JWT_SECRET || "changeme-secret-jwt";
 function sanitize(v) {
   return v ? String(v).replace(/["'`\s]/g, "").trim() : "";
+}
+
+function _collectorRawKey() {
+  const raw = crypto.randomBytes(32).toString("base64");
+  return raw.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function _collectorHash(rawKey) {
+  return crypto.createHash("sha256").update(String(rawKey || "")).digest("hex");
+}
+
+function _collectorMatches(rawKey, storedHashHex) {
+  try {
+    const a = Buffer.from(_collectorHash(rawKey), "hex");
+    const b = Buffer.from(String(storedHashHex || ""), "hex");
+    if (!a.length || a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+async function authorizeCollector(req) {
+  const key = sanitize(req.headers["x-collector-key"] || "");
+  const cid =
+    (req.query?.client_id ? parseInt(req.query.client_id) : null) ||
+    (req.body?.client_id ? parseInt(req.body.client_id) : null);
+
+  if (!cid || !Number.isFinite(cid) || cid <= 0) {
+    return { ok: false, status: 400, error: "client_id required" };
+  }
+
+  if (COLLECTOR_KEY && key && key === COLLECTOR_KEY) {
+    return { ok: true, client_id: cid, mode: "legacy" };
+  }
+
+  const r = await pool.query("SELECT collector_key_hash FROM clients WHERE id=$1 LIMIT 1", [cid]);
+  if (r.rows.length === 0) return { ok: false, status: 404, error: "client not found" };
+  const hash = String(r.rows[0].collector_key_hash || "");
+  if (!hash) return { ok: false, status: 403, error: "collector_key not provisioned" };
+  if (!key || !_collectorMatches(key, hash)) return { ok: false, status: 401, error: "Unauthorized" };
+  return { ok: true, client_id: cid, mode: "client" };
 }
 const WEBSOCKET_URL = sanitize(process.env.WEBSOCKET_URL || "");
 const TG_TOKEN_GLOBAL = sanitize(process.env.TELEGRAM_TOKEN || "");
@@ -1009,9 +1056,8 @@ app.put("/devices/:id/rtsp", auth, requireAccessLevel(2), async (req, res) => {
 });
 
 app.get("/collector/onvif-config", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
@@ -1054,9 +1100,8 @@ app.get("/collector/onvif-config", async (req, res) => {
 });
 
 app.get("/collector/rtsp-config", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
@@ -1119,9 +1164,8 @@ app.get("/collector/rtsp-config", async (req, res) => {
 });
 
 app.get("/collector/devices", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
@@ -1181,9 +1225,8 @@ app.get("/collector/devices", async (req, res) => {
 });
 
 app.get("/collector/notify-config", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
@@ -1224,9 +1267,8 @@ app.get("/collector/notify-config", async (req, res) => {
 });
 
 app.get("/collector/client-notify", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
@@ -1266,9 +1308,8 @@ app.get("/collector/client-notify", async (req, res) => {
 });
 
 app.get("/collector/global-notify", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     res.json({
@@ -1287,9 +1328,8 @@ app.get("/collector/global-notify", async (req, res) => {
 });
 
 app.get("/collector/automation-rules", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     const cid = req.query.client_id ? parseInt(req.query.client_id) : null;
@@ -1319,9 +1359,8 @@ app.get("/collector/automation-rules", async (req, res) => {
 });
 
 app.post("/collector/automation-rules", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     function sanitizeLabel(v) {
@@ -1475,9 +1514,8 @@ app.post("/collector/automation-rules", async (req, res) => {
 });
 
 app.post("/collector/discovery", async (req, res) => {
-  const key = sanitize(req.headers["x-collector-key"] || "");
-  if (!COLLECTOR_KEY) return res.status(503).json({ error: "Collector key not configured" });
-  if (!key || key !== COLLECTOR_KEY) return res.status(401).json({ error: "Unauthorized" });
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
   try {
     const agent_id = sanitize(req.body?.agent_id || "");
@@ -1946,7 +1984,18 @@ app.post("/devices/:id/test", auth, async (req, res) => {
 
 // ── Clients ──────────────────────────────────────────────────
 app.get("/clients", auth, superadmin, async (req, res) => {
-  const r = await pool.query("SELECT * FROM clients ORDER BY name");
+  const r = await pool.query(
+    `
+    SELECT
+      id, name, document, email, phone, address, city, state, plan, status,
+      telegram_token, telegram_chat_id, alert_email, wa_instance, wa_token, wa_number, notes,
+      created_at,
+      (collector_key_hash <> '') AS collector_key_set,
+      collector_key_rotated_at
+    FROM clients
+    ORDER BY name
+    `
+  );
   res.json(r.rows);
 });
 
@@ -1956,18 +2005,42 @@ app.post("/clients", auth, superadmin, async (req, res) => {
     plan, status, telegram_token, telegram_chat_id, 
     alert_email, wa_instance, wa_token, wa_number, notes 
   } = req.body;
+  const collectorKey = _collectorRawKey();
+  const collectorHash = _collectorHash(collectorKey);
   const r = await pool.query(`
     INSERT INTO clients (
       name, document, email, phone, address, city, state, 
       plan, status, telegram_token, telegram_chat_id, 
-      alert_email, wa_instance, wa_token, wa_number, notes
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *
+      alert_email, wa_instance, wa_token, wa_number, notes,
+      collector_key_hash, collector_key_rotated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
+    RETURNING id, name, document, email, phone, address, city, state, plan, status,
+      telegram_token, telegram_chat_id, alert_email, wa_instance, wa_token, wa_number, notes,
+      created_at, collector_key_rotated_at
   `, [
     name, document||"", email||"", phone||"", address||"", city||"", state||"", 
     plan||"basic", status||"active", telegram_token||"", telegram_chat_id||"", 
-    alert_email||"", wa_instance||"", wa_token||"", wa_number||"", notes||""
+    alert_email||"", wa_instance||"", wa_token||"", wa_number||"", notes||"",
+    collectorHash
   ]);
-  res.status(201).json(r.rows[0]);
+  res.status(201).json({
+    ...r.rows[0],
+    collector_key_set: true,
+    collector_key: collectorKey,
+  });
+});
+
+app.post("/clients/:id/collector-key/rotate", auth, superadmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || !Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const collectorKey = _collectorRawKey();
+  const collectorHash = _collectorHash(collectorKey);
+  const r = await pool.query(
+    "UPDATE clients SET collector_key_hash=$1, collector_key_rotated_at=NOW() WHERE id=$2 RETURNING collector_key_rotated_at",
+    [collectorHash, id]
+  );
+  if (r.rows.length === 0) return res.status(404).json({ error: "not_found" });
+  res.json({ ok: true, id, collector_key: collectorKey, collector_key_rotated_at: r.rows[0].collector_key_rotated_at });
 });
 
 app.put("/clients/:id", auth, superadmin, async (req, res) => {
@@ -1981,7 +2054,10 @@ app.put("/clients/:id", auth, superadmin, async (req, res) => {
       name=$1, document=$2, email=$3, phone=$4, address=$5, city=$6, state=$7, 
       plan=$8, status=$9, telegram_token=$10, telegram_chat_id=$11, 
       alert_email=$12, wa_instance=$13, wa_token=$14, wa_number=$15, notes=$16
-    WHERE id=$17 RETURNING *
+    WHERE id=$17
+    RETURNING id, name, document, email, phone, address, city, state, plan, status,
+      telegram_token, telegram_chat_id, alert_email, wa_instance, wa_token, wa_number, notes,
+      created_at, (collector_key_hash <> '') AS collector_key_set, collector_key_rotated_at
   `, [
     name, document||"", email||"", phone||"", address||"", city||"", state||"", 
     plan||"basic", status||"active", telegram_token||"", telegram_chat_id||"", 

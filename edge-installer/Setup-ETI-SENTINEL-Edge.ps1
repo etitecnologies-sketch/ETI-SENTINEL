@@ -742,7 +742,6 @@ try {
     $defaultIngest = (Read-EnvValue $existingEnv "INGEST_API_URL").Trim()
     if (!$defaultIngest) { $defaultIngest = "https://eti-sentinel-production.up.railway.app" }
     $defaultKey = (Read-EnvValue $existingEnv "COLLECTOR_KEY").Trim()
-    if (!$defaultKey) { $defaultKey = "etiSENTINEL_collector_2026_etitecnologies" }
     $defaultCid = (Read-EnvValue $existingEnv "CLIENT_ID").Trim()
 
     $ingest = $Ingest.Trim()
@@ -755,7 +754,7 @@ try {
 
     $key = $CollectorKey.Trim()
     if (!$key -and $Update) { $key = $defaultKey }
-    if (!$key) { $key = (Read-Host "COLLECTOR_KEY (Enter = default)").Trim() }
+    if (!$key) { $key = (Read-Host "COLLECTOR_KEY").Trim() }
     if (!$key) { $key = $defaultKey }
     $key = $key.Trim('`').Trim('"').Trim("'").Trim()
     if (!$key) { throw "COLLECTOR_KEY é obrigatório." }

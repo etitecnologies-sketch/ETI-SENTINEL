@@ -564,12 +564,14 @@ class PushRelay:
     def _refresh_global_notify(self) -> None:
         url = self._ingest_url()
         key = self._collector_key()
-        if not url or not key:
+        cid = self._client_id()
+        if not url or not key or not cid:
             return
         try:
             r = self._sess.get(
                 url + "/collector/global-notify",
                 headers={"x-collector-key": key},
+                params={"client_id": cid},
                 timeout=(5, 18),
             )
             if r.status_code != 200:

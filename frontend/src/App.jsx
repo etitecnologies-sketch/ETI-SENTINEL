@@ -709,7 +709,7 @@ const EMPTY_CLIENT = {
   wa_instance: "", wa_token: "", wa_number: "",
 };
 
-function ClientModal({ client, onSave, onClose }) {
+function ClientModal({ client, onSave, onClose, onProvision }) {
   const [form, setForm] = useState(client ? { ...EMPTY_CLIENT, ...client } : { ...EMPTY_CLIENT });
   const [tab, setTab] = useState("info");
   const [loading, setLoading] = useState(false);
@@ -720,8 +720,17 @@ function ClientModal({ client, onSave, onClose }) {
     if (!form.name) return setErr("Nome obrigatório");
     setLoading(true); setErr("");
     try {
-      if (client?.id) await api(`/clients/${client.id}`, { method: "PUT", body: JSON.stringify(form) });
-      else await api("/clients", { method: "POST", body: JSON.stringify(form) });
+      let saved;
+      if (client?.id) saved = await api(`/clients/${client.id}`, { method: "PUT", body: JSON.stringify(form) });
+      else saved = await api("/clients", { method: "POST", body: JSON.stringify(form) });
+
+      if (saved?.collector_key && typeof onProvision === "function") {
+        onProvision({
+          client_id: saved.id,
+          collector_key: saved.collector_key,
+          collector_key_rotated_at: saved.collector_key_rotated_at || null,
+        });
+      }
       onSave();
     } catch (e) { 
       console.error("Save Client Error:", e);
@@ -730,8 +739,8 @@ function ClientModal({ client, onSave, onClose }) {
     finally { setLoading(false); }
   };
 
-  const tabs = ["info", "contato", "alertas", "notas"];
-  const tabLabel = { info: "📋 Info", contato: "📞 Contato", alertas: "🔔 Alertas", notas: "📝 Notas" };
+  const tabs = ["info", "contato", ...(client?.id ? ["edge"] : []), "alertas", "notas"];
+  const tabLabel = { info: "📋 Info", contato: "📞 Contato", edge: "🔑 Edge", alertas: "🔔 Alertas", notas: "📝 Notas" };
 
   return (
     <div style={S.modal} onClick={onClose}>
@@ -780,6 +789,56 @@ function ClientModal({ client, onSave, onClose }) {
             <div style={S.grid(2)}>
               <div style={S.fg}><label style={S.label}>Cidade</label><input style={S.input} value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="Paraíso do Tocantins" /></div>
               <div style={S.fg}><label style={S.label}>Estado</label><input style={S.input} value={form.state} onChange={(e) => set("state", e.target.value)} placeholder="TO" /></div>
+            </div>
+          </>
+        )}
+
+        {tab === "edge" && client?.id && (
+          <>
+            <div style={{ ...S.fg, background: "#0d1520", borderRadius: 6, padding: 10, marginBottom: 14, fontSize: 10, color: "#4a6080" }}>
+              🔐 A chave `COLLECTOR_KEY` autentica os Edge Agents deste cliente. Ao rotacionar, você precisa atualizar os Edges (Local A/B/C).
+            </div>
+
+            <div style={S.grid(2)}>
+              <div style={S.fg}>
+                <label style={S.label}>CLIENT_ID</label>
+                <input style={{ ...S.input, fontFamily: "monospace" }} value={String(client.id)} readOnly />
+              </div>
+              <div style={S.fg}>
+                <label style={S.label}>Status da COLLECTOR_KEY</label>
+                <input
+                  style={{ ...S.input, fontFamily: "monospace" }}
+                  value={client.collector_key_set ? "configurada" : "não configurada"}
+                  readOnly
+                />
+              </div>
+            </div>
+            <div style={S.fg}>
+              <label style={S.label}>Última rotação</label>
+              <input
+                style={{ ...S.input, fontFamily: "monospace" }}
+                value={client.collector_key_rotated_at ? String(client.collector_key_rotated_at) : "—"}
+                readOnly
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                style={S.btn("primary")}
+                onClick={async () => {
+                  if (!confirm("Rotacionar a COLLECTOR_KEY deste cliente? Os Edges antigos vão parar até serem atualizados.")) return;
+                  const r = await api(`/clients/${client.id}/collector-key/rotate`, { method: "POST" });
+                  if (r?.collector_key && typeof onProvision === "function") {
+                    onProvision({
+                      client_id: client.id,
+                      collector_key: r.collector_key,
+                      collector_key_rotated_at: r.collector_key_rotated_at || null,
+                    });
+                  }
+                }}
+              >
+                Gerar/Rotacionar COLLECTOR_KEY
+              </button>
             </div>
           </>
         )}
@@ -834,6 +893,7 @@ function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [modal, setModal] = useState(null);
   const [userModal, setUserModal] = useState(null);
+  const [provision, setProvision] = useState(null);
   const [newUser, setNewUser] = useState({ username: "", password: "", access_level: 1 });
   const [search, setSearch] = useState("");
   const [hoverId, setHoverId] = useState(null);
@@ -926,7 +986,57 @@ function ClientsPage() {
       </div>
 
       {(modal === "new" || (modal && modal.id)) && (
-        <ClientModal client={modal === "new" ? null : modal} onSave={() => { load(); setModal(null); }} onClose={() => setModal(null)} />
+        <ClientModal
+          client={modal === "new" ? null : modal}
+          onSave={() => { load(); setModal(null); }}
+          onClose={() => setModal(null)}
+          onProvision={(p) => setProvision(p)}
+        />
+      )}
+
+      {provision && (
+        <div style={S.modal} onClick={() => setProvision(null)}>
+          <div style={{ ...S.modalBox, width: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>🔑 Chave do Edge (gerada agora)</div>
+            <div style={{ fontSize: 11, color: "#93a4bf", marginBottom: 12 }}>
+              Esta chave aparece apenas uma vez. Copie e salve com segurança.
+            </div>
+            <div style={S.fg}>
+              <label style={S.label}>Config para o `.env` do Edge</label>
+              <textarea
+                style={{ ...S.input, minHeight: 140, resize: "vertical", fontFamily: "monospace" }}
+                readOnly
+                value={
+                  `INGEST_API_URL=${API}\n` +
+                  `CLIENT_ID=${provision.client_id}\n` +
+                  `COLLECTOR_KEY=${provision.collector_key}\n` +
+                  `AGENT_ID=LOCAL_A\n`
+                }
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={S.btn("ghost")} onClick={() => setProvision(null)}>Fechar</button>
+              <button
+                style={S.btn("primary")}
+                onClick={async () => {
+                  const txt =
+                    `INGEST_API_URL=${API}\n` +
+                    `CLIENT_ID=${provision.client_id}\n` +
+                    `COLLECTOR_KEY=${provision.collector_key}\n` +
+                    `AGENT_ID=LOCAL_A\n`;
+                  try {
+                    await navigator.clipboard.writeText(txt);
+                    alert("Copiado para a área de transferência");
+                  } catch {
+                    alert("Não foi possível copiar automaticamente. Copie manualmente.");
+                  }
+                }}
+              >
+                Copiar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {userModal && (
