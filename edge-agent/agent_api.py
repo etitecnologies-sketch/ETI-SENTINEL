@@ -172,7 +172,7 @@ class PushRelay:
         }
         try:
             try:
-                snap_max = int(self.env.get("EDGE_SNAPSHOT_B64_MAX_LEN") or 800000)
+                snap_max = int(self.env.get("EDGE_SNAPSHOT_B64_MAX_LEN") or 1400000)
             except Exception:
                 snap_max = 800000
             for k, v in (payload or {}).items():

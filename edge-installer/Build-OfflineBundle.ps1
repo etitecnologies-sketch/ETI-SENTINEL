@@ -34,11 +34,16 @@ Dl "https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/mediamtx_v1.
 try {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     $req = Join-Path $repoRoot "edge-agent\requirements.txt"
+    $reqAi = Join-Path $repoRoot "edge-agent\requirements-ai.txt"
     if (Test-Path $req) {
         Write-Host "[INFO] Baixando wheels (wheelhouse) a partir de requirements.txt" -ForegroundColor Cyan
         python -m pip download -r $req -d (Join-Path $root "wheelhouse")
     } else {
         Write-Host "[WARN] requirements.txt não encontrado; pulando wheelhouse" -ForegroundColor Yellow
+    }
+    if (Test-Path $reqAi) {
+        Write-Host "[INFO] Baixando wheels (wheelhouse) a partir de requirements-ai.txt" -ForegroundColor Cyan
+        python -m pip download -r $reqAi -d (Join-Path $root "wheelhouse")
     }
 } catch {
     Write-Host "[WARN] Falha ao baixar wheelhouse automaticamente: $($_.Exception.Message)" -ForegroundColor Yellow

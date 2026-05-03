@@ -688,17 +688,34 @@ function Ensure-Venv([string]$edgeDir) {
     $req = Join-Path $edgeDir "requirements.txt"
     if (!(Test-Path $req)) { throw "requirements.txt não encontrado: $req" }
     $wheelhouse = Offline-File "wheelhouse"
+    $envFile = Join-Path $edgeDir ".env"
+    $aiReq = Join-Path $edgeDir "requirements-ai.txt"
+    $aiEnabled = ""
+    try {
+        if (Test-Path $envFile) { $aiEnabled = (Read-EnvValue $envFile "ENABLE_AI_ANALYTICS").Trim() }
+    } catch {}
+    $installAI = ((Test-Path $aiReq) -and ($aiEnabled -eq "1" -or $aiEnabled.ToLower() -eq "true"))
     if ($wheelhouse -and (Test-Path $wheelhouse)) {
         & $py -m pip --version | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "pip não disponível na venv." }
         & $py -m pip install --no-index --find-links $wheelhouse -r $req | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge (offline)." }
+        if ($installAI) {
+            Write-Inf "Instalando dependências de IA (offline)..."
+            & $py -m pip install --no-index --find-links $wheelhouse -r $aiReq | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements de IA (offline)." }
+        }
         return
     }
     & $py -m pip install --upgrade pip --no-cache-dir | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar/atualizar pip na venv." }
     & $py -m pip install --no-cache-dir -r $req | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge." }
+    if ($installAI) {
+        Write-Inf "Instalando dependências de IA..."
+        & $py -m pip install --no-cache-dir -r $aiReq | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements de IA." }
+    }
 }
 
 function Ensure-Icon([string]$installDir) {

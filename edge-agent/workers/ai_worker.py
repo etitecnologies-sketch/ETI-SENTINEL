@@ -68,7 +68,7 @@ class AIWorker:
             try:
                 from ultralytics import YOLO  # type: ignore
 
-                model_name = _sanitize(os.getenv("AI_MODEL") or "yolov8n.pt")
+                model_name = _sanitize(os.getenv("AI_MODEL") or "yolov8s.pt")
                 self._model = YOLO(model_name)
             except Exception as e:
                 logger.warning(f"[AI] ultralytics/YOLO not available: {e}")
@@ -81,7 +81,7 @@ class AIWorker:
 
     def _should_analyze(self, stream_key: str, now: float) -> bool:
         try:
-            every_s = float(os.getenv("AI_FRAME_EVERY_SECONDS") or 1.0)
+            every_s = float(os.getenv("AI_FRAME_EVERY_SECONDS") or 0.5)
         except Exception:
             every_s = 1.0
         last = float(self._last_frame_ts.get(stream_key) or 0.0)
@@ -323,7 +323,7 @@ class AIWorker:
 
     def _cooldown_ok(self, device_id: int, channel: int, cls_name: str, now: float) -> bool:
         try:
-            cooldown_s = float(os.getenv("AI_EVENT_COOLDOWN_SECONDS") or 120)
+            cooldown_s = float(os.getenv("AI_EVENT_COOLDOWN_SECONDS") or 45)
         except Exception:
             cooldown_s = 120.0
         k = (int(device_id), int(channel), cls_name)
@@ -375,11 +375,11 @@ class AIWorker:
 
     def _confirm_ok(self, device_id: int, channel: int, key: str, now: float) -> bool:
         try:
-            need = int(os.getenv("AI_CONFIRM_FRAMES") or 2)
+            need = int(os.getenv("AI_CONFIRM_FRAMES") or 1)
         except Exception:
             need = 2
         try:
-            win = float(os.getenv("AI_CONFIRM_WINDOW_SECONDS") or 2.0)
+            win = float(os.getenv("AI_CONFIRM_WINDOW_SECONDS") or 1.0)
         except Exception:
             win = 2.0
         need = max(1, int(need))
@@ -413,6 +413,51 @@ class AIWorker:
             return True
         return cls_name.strip().lower() in allowed
 
+    def _parse_kv_float_map(self, raw: str) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for part in str(raw or "").split(","):
+            if "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            k = k.strip().lower()
+            if not k:
+                continue
+            try:
+                out[k] = float(v.strip())
+            except Exception:
+                continue
+        return out
+
+    def _conf_threshold_for(self, cls_name: str, base: float) -> float:
+        c = cls_name.strip().lower()
+        raw = os.getenv("AI_CLASS_THRESHOLDS") or ""
+        m = self._parse_kv_float_map(raw)
+        if c in m:
+            return max(0.0, min(1.0, float(m[c])))
+        g = self._group_for_class(c)
+        if g == "human":
+            try:
+                return max(0.0, min(1.0, float(os.getenv("AI_PERSON_CONF_THRESHOLD") or base)))
+            except Exception:
+                return max(0.0, min(1.0, float(base)))
+        if g == "vehicle":
+            try:
+                return max(0.0, min(1.0, float(os.getenv("AI_VEHICLE_CONF_THRESHOLD") or base)))
+            except Exception:
+                return max(0.0, min(1.0, float(base)))
+        return max(0.0, min(1.0, float(base)))
+
+    def _min_area_ratio_for(self, cls_name: str) -> float:
+        c = cls_name.strip().lower()
+        raw = os.getenv("AI_CLASS_MIN_AREA_RATIO") or ""
+        m = self._parse_kv_float_map(raw)
+        if c in m:
+            return max(0.0, float(m[c]))
+        try:
+            return max(0.0, float(os.getenv("AI_MIN_AREA_RATIO") or 0.0))
+        except Exception:
+            return 0.0
+
     def run(self) -> None:
         if not _bool(os.getenv("ENABLE_AI_ANALYTICS") or "0"):
             return
@@ -423,11 +468,11 @@ class AIWorker:
         debug = _bool(os.getenv("AI_DEBUG_LOG") or "0")
 
         try:
-            conf_th = float(os.getenv("AI_CONF_THRESHOLD") or 0.6)
+            conf_th = float(os.getenv("AI_CONF_THRESHOLD") or 0.55)
         except Exception:
             conf_th = 0.6
         try:
-            yolo_conf = float(os.getenv("AI_YOLO_CONF") or 0.15)
+            yolo_conf = float(os.getenv("AI_YOLO_CONF") or 0.2)
         except Exception:
             yolo_conf = 0.15
         try:
@@ -435,7 +480,7 @@ class AIWorker:
         except Exception:
             yolo_iou = 0.45
         try:
-            img_size = int(os.getenv("AI_IMAGE_SIZE") or 640)
+            img_size = int(os.getenv("AI_IMAGE_SIZE") or 768)
         except Exception:
             img_size = 640
         try:
@@ -527,6 +572,14 @@ class AIWorker:
                         if boxes is None:
                             continue
 
+                        frame_area = 0.0
+                        try:
+                            fh, fw = frame.shape[:2]
+                            if fw and fh:
+                                frame_area = float(int(fw) * int(fh))
+                        except Exception:
+                            frame_area = 0.0
+
                         any_fired = False
                         det_total = 0
                         det_pass = 0
@@ -552,14 +605,31 @@ class AIWorker:
                                         best_cls = _sanitize(names.get(cls_idx) or str(cls_idx))
                                 except Exception:
                                     pass
-                                if conf < max(0.0, min(1.0, conf_th)):
-                                    continue
-                                det_conf_ok += 1
                                 cls_name = _sanitize(names.get(cls_idx) or str(cls_idx))
                                 if not cls_name:
                                     continue
+                                thr = self._conf_threshold_for(cls_name, conf_th)
+                                if conf < float(thr):
+                                    continue
+                                det_conf_ok += 1
                                 if not self._allowed_class(cls_name):
                                     continue
+                                min_area_ratio = float(self._min_area_ratio_for(cls_name) or 0.0)
+                                if frame_area > 0.0 and min_area_ratio > 0.0:
+                                    try:
+                                        xyxy = getattr(b, "xyxy", None)
+                                        if xyxy is not None:
+                                            if hasattr(xyxy, "tolist"):
+                                                xy = xyxy[0].tolist() if hasattr(xyxy, "__len__") else xyxy.tolist()
+                                            else:
+                                                xy = list(xyxy[0]) if hasattr(xyxy, "__len__") else list(xyxy)
+                                            if len(xy) >= 4:
+                                                x1, y1, x2, y2 = float(xy[0]), float(xy[1]), float(xy[2]), float(xy[3])
+                                                area = max(0.0, (x2 - x1)) * max(0.0, (y2 - y1))
+                                                if (area / frame_area) < min_area_ratio:
+                                                    continue
+                                    except Exception:
+                                        pass
                                 det_class_ok += 1
                                 det_pass += 1
                                 ev_type = self._event_for(cls_name)
