@@ -104,9 +104,16 @@ function Download-File([string]$url, [string]$dest, [switch]$IsZip) {
     for ($i = 1; $i -le 3; $i++) {
         try {
             if (Test-Path $dest) { Remove-Item $dest -Force -ErrorAction SilentlyContinue }
+            $ok = $false
             if (Ensure-Command "Start-BitsTransfer") {
-                Start-BitsTransfer -Source $url -Destination $dest -ErrorAction Stop
-            } else {
+                try {
+                    Start-BitsTransfer -Source $url -Destination $dest -ErrorAction Stop
+                    $ok = $true
+                } catch {
+                    $ok = $false
+                }
+            }
+            if (-not $ok) {
                 Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing -Headers @{"Cache-Control"="no-cache";"Pragma"="no-cache"} -ErrorAction Stop
             }
             if (!(Test-Path $dest)) { throw "download_missing" }
