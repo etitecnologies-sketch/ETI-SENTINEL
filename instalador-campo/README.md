@@ -51,6 +51,28 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 - Rotação de `COLLECTOR_KEY` não é “automática” no update: você precisa atualizar o `.env` de cada Edge.
 
+## Atualizar o kit (pendrive)
+
+Para levar o kit sempre atualizado em campo, rode no seu PC (dentro do repositório):
+
+```powershell
+.00-Atualizar-Kit.ps1
+```
+
+Isso faz `git pull` e gera uma pasta `KIT-PENDRIVE` pronta para copiar para o pendrive.
+
+Gerar com bundle offline junto (recomendado para clientes corporativos):
+
+```powershell
+.00-Atualizar-Kit.ps1 -WithOfflineBundle
+```
+
+Gerar também ZIP:
+
+```powershell
+.00-Atualizar-Kit.ps1 -WithOfflineBundle -Zip
+```
+
 ## Checklist
 
 Use o checklist rápido em [CHECKLIST.md](file:///c:/Users/EZEQUIEL%20LIMA%20GUIDA/Desktop/ETI%20SENTINEL/instalador-campo/CHECKLIST.md).
