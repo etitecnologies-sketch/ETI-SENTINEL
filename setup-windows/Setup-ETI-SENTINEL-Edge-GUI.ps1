@@ -169,9 +169,17 @@ $form.Controls.Add($txtLog)
 
 $script:InstallJob = $null
 $script:InstallTimer = $null
+$script:LogFile = Join-Path $env:TEMP ("eti-sentinel-setup-" + [Guid]::NewGuid().ToString("N") + ".log")
+
+try {
+    [System.IO.File]::WriteAllText($script:LogFile, "", (New-Object System.Text.UTF8Encoding($false)))
+} catch {}
 
 function Append-Log([string]$line) {
     if (!$line) { return }
+    try {
+        [System.IO.File]::AppendAllText($script:LogFile, $line + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    } catch {}
     $form.BeginInvoke([Action] {
         $txtLog.AppendText($line + "`r`n")
         $txtLog.SelectionStart = $txtLog.Text.Length
@@ -284,8 +292,10 @@ $btnInstall.Add_Click({
                 return
             }
 
-            $out = Receive-Job -Job $job -Keep -ErrorAction SilentlyContinue
-            foreach ($l in $out) { Append-Log $l }
+            $ev = @()
+            $out = Receive-Job -Job $job -Keep -ErrorAction SilentlyContinue -ErrorVariable ev
+            foreach ($l in $out) { Append-Log ("" + $l) }
+            foreach ($e in ($ev | Where-Object { $_ })) { Append-Log ("[ERR] " + ($e.ToString())) }
             if ($job.State -eq "Running") {
                 if ($bar.Value -lt 85) { Set-Progress ($bar.Value + 1) }
                 return
@@ -298,11 +308,13 @@ $btnInstall.Add_Click({
                 if ($job.State -eq "Failed") {
                     Append-Log "[ERR] Falha na instalação"
                     if ($err) { foreach ($e in $err) { Append-Log ("[ERR] " + $e.ToString()) } }
-                    [System.Windows.Forms.MessageBox]::Show("Falha na instalação. Veja o log.") | Out-Null
+                    Append-Log ("[INFO] Log salvo em: " + $script:LogFile)
+                    [System.Windows.Forms.MessageBox]::Show("Falha na instalação. Log salvo em:`r`n$($script:LogFile)") | Out-Null
                     Set-Progress 0
                 } else {
                     Set-Progress 100
-                    [System.Windows.Forms.MessageBox]::Show("Instalação concluída.") | Out-Null
+                    Append-Log ("[INFO] Log salvo em: " + $script:LogFile)
+                    [System.Windows.Forms.MessageBox]::Show("Instalação concluída. Log salvo em:`r`n$($script:LogFile)") | Out-Null
                 }
             } finally {
                 try { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue } catch {}
