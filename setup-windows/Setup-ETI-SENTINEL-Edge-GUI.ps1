@@ -167,6 +167,9 @@ $txtLog.Size = New-Object System.Drawing.Size(570, 250)
 $txtLog.Location = New-Object System.Drawing.Point(16, 230)
 $form.Controls.Add($txtLog)
 
+$script:InstallJob = $null
+$script:InstallTimer = $null
+
 function Append-Log([string]$line) {
     if (!$line) { return }
     $form.BeginInvoke([Action] {
@@ -182,20 +185,30 @@ function Set-Progress([int]$v) {
 }
 
 $btnInstall.Add_Click({
-    $ing = ("" + $txtIngest.Text).Trim()
-    $cid = ("" + $txtClient.Text).Trim()
-    $ck = ("" + $txtKey.Text).Trim()
-    if (!$ing) { [System.Windows.Forms.MessageBox]::Show("Informe INGEST_API_URL") | Out-Null; return }
-    if (!$ck) { [System.Windows.Forms.MessageBox]::Show("Informe COLLECTOR_KEY") | Out-Null; return }
-    Set-Progress 2
-    $btnInstall.Enabled = $false
-    $chkUpdate.Enabled = $false
-    $txtIngest.Enabled = $false
-    $txtClient.Enabled = $false
-    $txtKey.Enabled = $false
+    try {
+        $ing = ("" + $txtIngest.Text).Trim()
+        $cid = ("" + $txtClient.Text).Trim()
+        $ck = ("" + $txtKey.Text).Trim()
+        if (!$ing) { [System.Windows.Forms.MessageBox]::Show("Informe INGEST_API_URL") | Out-Null; return }
+        if (!$ck) { [System.Windows.Forms.MessageBox]::Show("Informe COLLECTOR_KEY") | Out-Null; return }
+        Set-Progress 2
+        $btnInstall.Enabled = $false
+        $chkUpdate.Enabled = $false
+        $txtIngest.Enabled = $false
+        $txtClient.Enabled = $false
+        $txtKey.Enabled = $false
 
-    $job = Start-Job -ScriptBlock {
-        param($ing, $cid, $ck, $doUpdate)
+        if ($script:InstallTimer) {
+            try { $script:InstallTimer.Stop() } catch {}
+            $script:InstallTimer = $null
+        }
+        if ($script:InstallJob) {
+            try { Remove-Job -Job $script:InstallJob -Force -ErrorAction SilentlyContinue } catch {}
+            $script:InstallJob = $null
+        }
+
+        $script:InstallJob = Start-Job -ScriptBlock {
+            param($ing, $cid, $ck, $doUpdate)
         $repoZip = "https://github.com/etitecnologies-sketch/ETI-SENTINEL/archive/refs/heads/main.zip"
         $tmp = Join-Path $env:TEMP ("eti-sentinel-setup-" + [Guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $tmp | Out-Null
@@ -252,41 +265,66 @@ $btnInstall.Add_Click({
 
         $p = Start-Process -FilePath "powershell.exe" -ArgumentList $args -Wait -PassThru
         if ($p.ExitCode -ne 0) { throw "Falha na instalação (ExitCode=$($p.ExitCode))" }
-        Write-Output "[OK] Instalado com sucesso."
-    } -ArgumentList @($ing, $cid, $ck, $chkUpdate.Checked)
+            Write-Output "[OK] Instalado com sucesso."
+        } -ArgumentList @($ing, $cid, $ck, $chkUpdate.Checked)
 
-    $timer = New-Object System.Windows.Forms.Timer
-    $timer.Interval = 400
-    $timer.Add_Tick({
-        $out = Receive-Job -Job $job -Keep -ErrorAction SilentlyContinue
-        foreach ($l in $out) { Append-Log $l }
-        if ($job.State -eq "Running") {
-            if ($bar.Value -lt 85) { Set-Progress ($bar.Value + 1) }
-            return
-        }
-        $timer.Stop()
-        try {
-            $err = $null
-            try { $err = Receive-Job -Job $job -ErrorAction SilentlyContinue } catch {}
-            if ($job.State -eq "Failed") {
-                Append-Log "[ERR] Falha na instalação"
-                if ($err) { foreach ($e in $err) { Append-Log ("[ERR] " + $e.ToString()) } }
-                [System.Windows.Forms.MessageBox]::Show("Falha na instalação. Veja o log.") | Out-Null
+        $script:InstallTimer = New-Object System.Windows.Forms.Timer
+        $script:InstallTimer.Interval = 400
+        $script:InstallTimer.Add_Tick({
+            $job = $script:InstallJob
+            if (!$job) {
+                try { $script:InstallTimer.Stop() } catch {}
+                $btnInstall.Enabled = $true
+                $chkUpdate.Enabled = $true
+                $txtIngest.Enabled = $true
+                $txtClient.Enabled = $true
+                $txtKey.Enabled = $true
                 Set-Progress 0
-            } else {
-                Set-Progress 100
-                [System.Windows.Forms.MessageBox]::Show("Instalação concluída.") | Out-Null
+                Append-Log "[ERR] Job de instalação não foi criado."
+                return
             }
-        } finally {
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-            $btnInstall.Enabled = $true
-            $chkUpdate.Enabled = $true
-            $txtIngest.Enabled = $true
-            $txtClient.Enabled = $true
-            $txtKey.Enabled = $true
-        }
-    })
-    $timer.Start()
+
+            $out = Receive-Job -Job $job -Keep -ErrorAction SilentlyContinue
+            foreach ($l in $out) { Append-Log $l }
+            if ($job.State -eq "Running") {
+                if ($bar.Value -lt 85) { Set-Progress ($bar.Value + 1) }
+                return
+            }
+
+            try { $script:InstallTimer.Stop() } catch {}
+            try {
+                $err = $null
+                try { $err = Receive-Job -Job $job -ErrorAction SilentlyContinue } catch {}
+                if ($job.State -eq "Failed") {
+                    Append-Log "[ERR] Falha na instalação"
+                    if ($err) { foreach ($e in $err) { Append-Log ("[ERR] " + $e.ToString()) } }
+                    [System.Windows.Forms.MessageBox]::Show("Falha na instalação. Veja o log.") | Out-Null
+                    Set-Progress 0
+                } else {
+                    Set-Progress 100
+                    [System.Windows.Forms.MessageBox]::Show("Instalação concluída.") | Out-Null
+                }
+            } finally {
+                try { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue } catch {}
+                $script:InstallJob = $null
+                $btnInstall.Enabled = $true
+                $chkUpdate.Enabled = $true
+                $txtIngest.Enabled = $true
+                $txtClient.Enabled = $true
+                $txtKey.Enabled = $true
+            }
+        })
+        $script:InstallTimer.Start()
+    } catch {
+        Append-Log ("[ERR] " + $_.Exception.Message)
+        try { [System.Windows.Forms.MessageBox]::Show("Falha ao iniciar a instalação. Veja o log.") | Out-Null } catch {}
+        $btnInstall.Enabled = $true
+        $chkUpdate.Enabled = $true
+        $txtIngest.Enabled = $true
+        $txtClient.Enabled = $true
+        $txtKey.Enabled = $true
+        Set-Progress 0
+    }
 })
 
 [void]$form.ShowDialog()
