@@ -16,8 +16,10 @@ function Dl([string]$url, [string]$dest) {
     if (!(Test-Path $dest)) { throw "download_failed: $url" }
 }
 
-$root = (Resolve-Path $OutDir).Path
-Ensure-Dir $root
+$outRaw = $OutDir
+if (!$outRaw) { $outRaw = "./edge-installer-bundle" }
+Ensure-Dir $outRaw
+$root = (Resolve-Path $outRaw).Path
 Ensure-Dir (Join-Path $root "winsw")
 Ensure-Dir (Join-Path $root "python")
 Ensure-Dir (Join-Path $root "ffmpeg")
@@ -50,4 +52,3 @@ if ($Zip) {
 }
 
 Write-Host "[OK] Bundle gerado em: $root" -ForegroundColor Green
-
