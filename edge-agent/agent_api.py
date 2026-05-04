@@ -73,6 +73,17 @@ def _mask(s: Any) -> str:
     return v[:2] + "***" + v[-2:]
 
 
+def _is_loopback_ip(ip: str) -> bool:
+    s = sanitize(ip)
+    if not s:
+        return False
+    if s == "::1":
+        return True
+    if s.startswith("127."):
+        return True
+    return False
+
+
 class PushRelay:
     def __init__(self, here: Path, env: Dict[str, str], log_path: Path):
         self.here = here
@@ -975,6 +986,41 @@ class Handler(BaseHTTPRequestHandler):
             n = 0
         if n <= 0:
             return {}
+
+    def _authorized(self) -> bool:
+        try:
+            remote_ip = ""
+            try:
+                remote_ip = str(self.client_address[0])
+            except Exception:
+                remote_ip = ""
+            if _is_loopback_ip(remote_ip):
+                return True
+            expected = sanitize(self.server.env.get("AGENT_API_KEY") or "")
+            if not expected:
+                return False
+            key = sanitize(self.headers.get("x-agent-key") or "")
+            auth = sanitize(self.headers.get("Authorization") or "")
+            if auth.lower().startswith("bearer "):
+                key = sanitize(auth.split(" ", 1)[1] or "")
+            return key == expected
+        except Exception:
+            return False
+
+    def _require_auth(self) -> bool:
+        if self._authorized():
+            return True
+        try:
+            raw = json.dumps({"error": "forbidden"}, ensure_ascii=False).encode("utf-8")
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+        except Exception:
+            pass
+        return False
         data = self.rfile.read(n)
         try:
             txt = data.decode("utf-8", errors="replace")
@@ -1033,6 +1079,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/health":
                 return self._json(200, {"ok": True})
+            if not self._require_auth():
+                return
             if path == "/api/status":
                 return self._json(200, {"ok": True, "relay": self.server.relay.status()})
             if path == "/api/rules":
@@ -1128,6 +1176,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             path = (self.path or "").split("?")[0]
+            if not self._require_auth():
+                return
             if path == "/api/push":
                 body = self._read_json()
                 source = sanitize(self.headers.get("x-event-source") or body.get("source") or "edge")
@@ -1183,7 +1233,7 @@ def main() -> None:
     parser.add_argument("--port", default=None)
     args = parser.parse_args()
 
-    bind = sanitize(args.bind) if args.bind is not None else sanitize(env.get("AGENT_API_BIND") or "0.0.0.0")
+    bind = sanitize(args.bind) if args.bind is not None else sanitize(env.get("AGENT_API_BIND") or "127.0.0.1")
     port = int(args.port) if args.port is not None else int(env.get("AGENT_API_PORT") or 8808)
     store = JobStore(here / ".state" / "agent_api.json")
     log_path = here / ".state" / "agent_api.log"

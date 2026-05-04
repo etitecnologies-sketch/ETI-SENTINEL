@@ -26,6 +26,10 @@ Você vai informar:
 
 Pré-requisito: você levou um bundle offline (pasta ou `.zip`).
 
+Observação: para offline “real” (sem internet), o bundle precisa incluir:
+- `wheelhouse/` (dependências Python)
+- `repo/main.zip` (snapshot do repositório)
+
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .03-Instalar-Edge-Offline.ps1 -OfflineBundle "D:\ETI-BUNDLE.zip"

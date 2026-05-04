@@ -108,12 +108,37 @@ function parseMultipartFirstFile(bodyBuf, boundary) {
   return null;
 }
 
-// Middleware de diagnóstico para logar todas as requisições no console do Railway
+function maskTokenLike(v) {
+  const s = v ? String(v) : "";
+  if (s.length <= 8) return "***";
+  return s.slice(0, 2) + "***" + s.slice(-2);
+}
+
+function sanitizeUrlForLog(originalUrl) {
+  try {
+    const u = new URL(String(originalUrl || ""), "http://localhost");
+    const sensitiveKeys = new Set(["token", "sn", "serial", "serial_number", "mac", "mac_address", "x-device-token"]);
+    for (const [k] of u.searchParams) {
+      const lk = String(k || "").toLowerCase();
+      if (sensitiveKeys.has(lk) || lk.includes("token") || lk.includes("pass")) {
+        u.searchParams.set(k, "***");
+      }
+    }
+    const p = u.pathname || "";
+    if (p.startsWith("/picture-upload/")) {
+      return "/picture-upload/***" + (u.search ? u.search : "");
+    }
+    return (u.pathname || "") + (u.search || "");
+  } catch {
+    return String(originalUrl || "").replace(/([?&](token|sn|serial|mac)=[^&]+)/gi, "$1***");
+  }
+}
+
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  // Redireciona POST na raiz para /push (ajuda câmeras que não deixam mudar o caminho)
-  if ((req.url === '/' || req.url === '') && req.method === 'POST') {
-    req.url = '/push';
+  const safeUrl = sanitizeUrlForLog(req.url);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${safeUrl}`);
+  if ((req.url === "/" || req.url === "") && req.method === "POST") {
+    req.url = "/push";
   }
   next();
 });
@@ -135,6 +160,24 @@ app.get("/push", (req, res) => res.json({ message: "Endpoint pronto para receber
 
 app.post(
   "/picture-upload/:token?",
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+      const t =
+        req.params.token ||
+        req.query.token ||
+        req.headers["x-device-token"] ||
+        req.query.sn ||
+        req.query.serial ||
+        req.query.mac ||
+        req.ip;
+      return String(t || req.ip || "");
+    },
+    handler: (req, res) => res.status(429).json({ error: "Too Many Requests" }),
+  }),
   express.raw({ type: () => true, limit: "15mb" }),
   async (req, res) => {
     const ct = String(req.headers["content-type"] || "");
@@ -202,6 +245,31 @@ app.post(
     const filename = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}.${img.ext}`;
     const absPath = path.join(baseDir, filename);
     fs.writeFileSync(absPath, fileBuf);
+
+    try {
+      const maxFiles = 300;
+      const files = fs.readdirSync(baseDir)
+        .map((n) => ({
+          name: n,
+          p: path.join(baseDir, n),
+        }))
+        .filter((x) => x.p.startsWith(baseDir))
+        .map((x) => {
+          try {
+            const st = fs.statSync(x.p);
+            return { ...x, mtime: st.mtimeMs, isFile: st.isFile() };
+          } catch {
+            return { ...x, mtime: 0, isFile: false };
+          }
+        })
+        .filter((x) => x.isFile)
+        .sort((a, b) => a.mtime - b.mtime);
+      if (files.length > maxFiles) {
+        for (const f of files.slice(0, files.length - maxFiles)) {
+          try { fs.unlinkSync(f.p); } catch {}
+        }
+      }
+    } catch {}
 
     const snapshot = {
       path: absPath,
@@ -521,7 +589,13 @@ async function initDB() {
 }
 initDB();
 
-const JWT_SECRET = process.env.JWT_SECRET || "changeme-secret-jwt";
+const isDev = (process.env.NODE_ENV || "").toLowerCase() === "development";
+const JWT_SECRET = process.env.JWT_SECRET || (isDev ? "dev-insecure-jwt" : "");
+if (!JWT_SECRET || JWT_SECRET === "changeme-secret-jwt" || JWT_SECRET === "dev-insecure-jwt") {
+  if (!isDev) {
+    throw new Error("JWT_SECRET obrigatório em produção.");
+  }
+}
 function sanitize(v) {
   return v ? String(v).replace(/["'`\s]/g, "").trim() : "";
 }
@@ -2281,7 +2355,7 @@ app.post("/push", metricsLimiter, async (req, res) => {
     (typeof finalEventType === "string" && finalEventType.toLowerCase() === "edge_heartbeat");
 
   if (!token) {
-    console.log("[Push] Requisição sem identificador recebida:", JSON.stringify(body));
+    console.log("[Push] Requisição sem identificador recebida");
     return res.status(401).json({ error: "Identification (Token/SN/MAC) required" });
   }
 
@@ -2306,12 +2380,12 @@ app.post("/push", metricsLimiter, async (req, res) => {
     `, [token, cleanToken]);
 
     if (dr.rows.length === 0) {
-      console.log(`[Push] Token/MAC/SN não encontrado: ${token}`);
+    console.log(`[Push] Token/MAC/SN não encontrado: ${maskTokenLike(token)}`);
       return res.status(401).json({ error: "Invalid identification" });
     }
     const dev = dr.rows[0];
 
-    console.log(`[Push] SINAL DE VIDA: ${dev.name} (${token})`);
+    console.log(`[Push] SINAL DE VIDA: ${dev.name} (${maskTokenLike(token)})`);
 
     // 1. Atualizar Sinal de Vida (Heartbeat)
     // Atualizamos o last_seen e o status para online imediatamente para o Dashboard

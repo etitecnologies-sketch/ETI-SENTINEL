@@ -26,6 +26,9 @@ Ensure-Dir $out
 Write-Host "[INFO] Copiando pasta instalador-campo..." -ForegroundColor Cyan
 Copy-Item -Path (Join-Path $repoRoot "instalador-campo") -Destination (Join-Path $out "instalador-campo") -Recurse -Force
 
+Write-Host "[INFO] Copiando edge-installer (para uso sem download)..." -ForegroundColor Cyan
+Copy-Item -Path (Join-Path $repoRoot "edge-installer") -Destination (Join-Path $out "edge-installer") -Recurse -Force
+
 if ($WithOfflineBundle) {
     Write-Host "[INFO] Gerando bundle offline..." -ForegroundColor Cyan
     $bundleDir = Join-Path $out "ETI-BUNDLE"

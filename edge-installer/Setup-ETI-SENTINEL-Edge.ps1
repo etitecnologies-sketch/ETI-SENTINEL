@@ -3,7 +3,9 @@ param(
     [string]$CollectorKey,
     [string]$ClientId,
     [switch]$Update,
-    [string]$OfflineBundle
+    [string]$OfflineBundle,
+    [string]$RepoZip,
+    [string]$PythonExe
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +36,9 @@ if (!(Test-Admin)) {
     if ($CollectorKey) { $argList += @("-CollectorKey", $CollectorKey) }
     if ($ClientId) { $argList += @("-ClientId", $ClientId) }
     if ($Update) { $argList += "-Update" }
+    if ($OfflineBundle) { $argList += @("-OfflineBundle", $OfflineBundle) }
+    if ($RepoZip) { $argList += @("-RepoZip", $RepoZip) }
+    if ($PythonExe) { $argList += @("-PythonExe", $PythonExe) }
     try {
         Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $argList | Out-Null
         exit 0
@@ -41,6 +46,17 @@ if (!(Test-Admin)) {
         throw "Falha ao elevar privilégios. Reexecute como Administrador."
     }
 }
+
+try {
+    $px = ("" + $PythonExe).Trim()
+    if (!$px) { $px = ("" + $env:ETI_PYTHON_EXE).Trim() }
+    if ($px) {
+        $px = $px.Trim('`"').Trim("'")
+        if (Test-Path $px) {
+            $script:PythonExe = (Resolve-Path $px).Path
+        }
+    }
+} catch {}
 
 $script:OfflineRoot = ""
 $script:OfflineTemp = ""
@@ -70,6 +86,22 @@ function Offline-File([string]$rel) {
     if (!$root) { return "" }
     $fp = Join-Path $root $rel
     if (Test-Path $fp) { return $fp }
+    return ""
+}
+
+function Resolve-RepoZipPath {
+    $p = ("" + $RepoZip).Trim()
+    if (!$p) { $p = ("" + $env:ETI_REPO_ZIP).Trim() }
+    if ($p) {
+        $p = $p.Trim('`"').Trim("'")
+        if (Test-Path $p) { return (Resolve-Path $p).Path }
+    }
+    $offlineZip = Offline-File "repo\\main.zip"
+    if ($offlineZip) { return $offlineZip }
+    $offlineZip = Offline-File "repo\\ETI-SENTINEL-main.zip"
+    if ($offlineZip) { return $offlineZip }
+    $offlineZip = Offline-File "main.zip"
+    if ($offlineZip) { return $offlineZip }
     return ""
 }
 
@@ -250,8 +282,24 @@ function Ensure-Services([string]$installDir) {
 }
 
 function Ensure-Python {
-    if (Ensure-Command "python") {
-        $script:PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+    function Is-WindowsAppsAlias([string]$p) {
+        if (!$p) { return $false }
+        try {
+            return ($p -like "*\\WindowsApps\\python.exe") -or ($p -like "*\\WindowsApps\\python3.exe")
+        } catch { return $false }
+    }
+
+    try {
+        if ($script:PythonExe -and (Test-Path $script:PythonExe) -and !(Is-WindowsAppsAlias $script:PythonExe)) {
+            return
+        }
+    } catch {}
+
+    $pyDirInstalled = Join-Path $installDir "python"
+    $pyExeInstalled = Join-Path $pyDirInstalled "python.exe"
+    if (Test-Path $pyExeInstalled) {
+        $script:PythonExe = $pyExeInstalled
+        $env:Path = "$pyDirInstalled;" + $env:Path
         return
     }
 
@@ -264,26 +312,47 @@ function Ensure-Python {
         ) | Where-Object { $_ }
         if ($candidates -and $candidates.Count -gt 0) { $offlinePy = $candidates[0] }
     }
+
     if ($offlinePy) {
         Write-Inf "Instalando Python via pacote offline..."
-        $pyDir = Join-Path $installDir "python"
-        New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
+        New-Item -ItemType Directory -Force -Path $pyDirInstalled | Out-Null
         $args = @(
             "/quiet",
             "InstallAllUsers=1",
             "Include_pip=1",
             "Include_test=0",
             "PrependPath=0",
-            "TargetDir=$pyDir"
+            "TargetDir=$pyDirInstalled"
         )
         $p = Start-Process -FilePath $offlinePy -ArgumentList $args -Wait -PassThru
         if ($p.ExitCode -ne 0) { throw "python_install_failed:$($p.ExitCode)" }
-        $pyExe = Join-Path $pyDir "python.exe"
-        if (!(Test-Path $pyExe)) { throw "python_not_found_after_offline_install" }
-        $script:PythonExe = $pyExe
-        $env:Path = "$pyDir;" + $env:Path
+        if (!(Test-Path $pyExeInstalled)) { throw "python_not_found_after_offline_install" }
+        $script:PythonExe = $pyExeInstalled
+        $env:Path = "$pyDirInstalled;" + $env:Path
         return
     }
+
+    if (Ensure-Command "python") {
+        $cmd = (Get-Command python -ErrorAction SilentlyContinue)
+        $src = ""
+        try { $src = $cmd.Source } catch {}
+        if ($src -and !(Is-WindowsAppsAlias $src)) {
+            $script:PythonExe = $src
+            return
+        }
+    }
+
+    try {
+        $cands = @()
+        try { $cands = (& where.exe python 2>$null) } catch {}
+        foreach ($c in ($cands | Where-Object { $_ })) {
+            $p = ("" + $c).Trim()
+            if ($p -and (Test-Path $p) -and !(Is-WindowsAppsAlias $p)) {
+                $script:PythonExe = $p
+                return
+            }
+        }
+    } catch {}
 
     if (Ensure-Command "winget") {
         Write-Inf "Instalando Python via winget..."
@@ -401,6 +470,12 @@ function Ensure-MediaMTXConfig {
                 $patched = $true
                 continue
             }
+            if ($ln -match '^\s*rtspAddress\s*:') { $out += "rtspAddress: 127.0.0.1:8554"; continue }
+            if ($ln -match '^\s*rtmpAddress\s*:') { $out += "rtmpAddress: 127.0.0.1:1935"; continue }
+            if ($ln -match '^\s*rtmpsAddress\s*:') { $out += "rtmpsAddress: 127.0.0.1:1936"; continue }
+            if ($ln -match '^\s*hlsAddress\s*:') { $out += "hlsAddress: 127.0.0.1:8888"; continue }
+            if ($ln -match '^\s*webrtcAddress\s*:') { $out += "webrtcAddress: 127.0.0.1:8889"; continue }
+            if ($ln -match '^\s*ips\s*:\s*\[\s*\]\s*$') { $out += "  ips: ['127.0.0.1', '::1']"; continue }
             $out += $ln
         }
         if (-not $patched) {
@@ -586,9 +661,16 @@ function Download-Repo([string]$destDir) {
     $tmp = Join-Path $env:TEMP ("eti-sentinel-main-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     $zip = Join-Path $tmp "main.zip"
-    $url = "https://github.com/etitecnologies-sketch/ETI-SENTINEL/archive/refs/heads/main.zip"
-    Write-Inf "Baixando ETI-SENTINEL (main.zip)..."
-    Download-File $url $zip -IsZip
+
+    $localZip = Resolve-RepoZipPath
+    if ($localZip) {
+        Write-Inf "Usando repositório local (main.zip): $localZip"
+        Copy-Item $localZip $zip -Force
+    } else {
+        $url = "https://github.com/etitecnologies-sketch/ETI-SENTINEL/archive/refs/heads/main.zip"
+        Write-Inf "Baixando ETI-SENTINEL (main.zip)..."
+        Download-File $url $zip -IsZip
+    }
     Write-Inf "Extraindo..."
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     $src = Get-ChildItem -Path $tmp -Directory | Where-Object { $_.Name -like "ETI-SENTINEL-*" } | Select-Object -First 1
@@ -633,6 +715,35 @@ function Download-Repo([string]$destDir) {
 }
 
 function Ensure-Env([string]$edgeDir, [string]$ingest, [string]$key, [string]$cid) {
+    function Get-EnvMap([string[]]$ls) {
+        $m = @{}
+        foreach ($ln in ($ls | Where-Object { $_ -ne $null })) {
+            if ($ln -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
+                $m[$Matches[1]] = $Matches[2]
+            }
+        }
+        return $m
+    }
+
+    function Get-Missing-ExampleLines([string]$examplePath, [hashtable]$existingMap) {
+        if (!(Test-Path $examplePath)) { return @() }
+        $out = @()
+        $exLines = Get-Content $examplePath -ErrorAction SilentlyContinue
+        foreach ($ln in ($exLines | Where-Object { $_ -ne $null })) {
+            $t = $ln.Trim()
+            if (!$t) { continue }
+            if ($t.StartsWith('#')) { continue }
+            if ($ln -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=') {
+                $k = $Matches[1]
+                if (!($existingMap.ContainsKey($k))) {
+                    $out += $ln
+                    $existingMap[$k] = ""
+                }
+            }
+        }
+        return $out
+    }
+
     $envPath = Join-Path $edgeDir ".env"
     if (!(Test-Path $envPath)) {
         $ex = Join-Path $edgeDir ".env.example"
@@ -640,26 +751,87 @@ function Ensure-Env([string]$edgeDir, [string]$ingest, [string]$key, [string]$ci
     }
     $lines = @()
     if (Test-Path $envPath) { $lines = Get-Content $envPath -ErrorAction SilentlyContinue }
-    $lines = $lines | Where-Object { $_ -notmatch '^(INGEST_API_URL|COLLECTOR_KEY|CLIENT_ID|ENABLE_STREAMING|ENABLE_RTSP_MONITOR|AGENT_API_BIND|AGENT_API_PORT|EDGE_USE_PYTHONW|EDGE_START_MEDIAMTX|EDGE_EVENT_DEDUPE_SECONDS|EDGE_VIDEOLOSS_CONFIRM_SECONDS|EDGE_RECOVERY_CONFIRM_SECONDS|EDGE_VIDEOLOSS_MIN_SECONDS|EDGE_NOTIFY_RECOVERY|EDGE_SUPPRESS_EVENT_TYPES|STREAM_RESTART_COOLDOWN_SECONDS|STREAM_MAX_RETRIES|STREAM_RETRY_MAX_BACKOFF_SECONDS)=' }
-    $lines += "INGEST_API_URL=$ingest"
-    $lines += "COLLECTOR_KEY=$key"
-    if ($cid) { $lines += "CLIENT_ID=$cid" }
-    $lines += "ENABLE_STREAMING=1"
-    $lines += "ENABLE_RTSP_MONITOR=0"
-    $lines += "AGENT_API_BIND=127.0.0.1"
-    $lines += "AGENT_API_PORT=8808"
-    $lines += "EDGE_USE_PYTHONW=0"
-    $lines += "EDGE_START_MEDIAMTX=0"
-    $lines += "EDGE_EVENT_DEDUPE_SECONDS=600"
-    $lines += "EDGE_VIDEOLOSS_CONFIRM_SECONDS=15"
-    $lines += "EDGE_RECOVERY_CONFIRM_SECONDS=10"
-    $lines += "EDGE_VIDEOLOSS_MIN_SECONDS=30"
-    $lines += "EDGE_NOTIFY_RECOVERY=0"
-    $lines += "EDGE_SUPPRESS_EVENT_TYPES="
-    $lines += "STREAM_RESTART_COOLDOWN_SECONDS=60"
-    $lines += "STREAM_MAX_RETRIES=0"
-    $lines += "STREAM_RETRY_MAX_BACKOFF_SECONDS=60"
-    [System.IO.File]::WriteAllLines($envPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
+
+    $controlledKeys = @(
+        "INGEST_API_URL",
+        "COLLECTOR_KEY",
+        "CLIENT_ID",
+        "ENABLE_STREAMING",
+        "ENABLE_RTSP_MONITOR",
+        "AGENT_API_BIND",
+        "AGENT_API_PORT",
+        "EDGE_USE_PYTHONW",
+        "EDGE_START_MEDIAMTX",
+        "EDGE_EVENT_DEDUPE_SECONDS",
+        "EDGE_VIDEOLOSS_CONFIRM_SECONDS",
+        "EDGE_RECOVERY_CONFIRM_SECONDS",
+        "EDGE_VIDEOLOSS_MIN_SECONDS",
+        "EDGE_NOTIFY_RECOVERY",
+        "EDGE_SUPPRESS_EVENT_TYPES",
+        "STREAM_RESTART_COOLDOWN_SECONDS",
+        "STREAM_MAX_RETRIES",
+        "STREAM_RETRY_MAX_BACKOFF_SECONDS"
+    )
+
+    $envMap = Get-EnvMap $lines
+    $missingExampleLines = Get-Missing-ExampleLines (Join-Path $edgeDir ".env.example") $envMap
+
+    $defaults = @{
+        "ENABLE_STREAMING" = "1"
+        "ENABLE_RTSP_MONITOR" = "0"
+        "AGENT_API_BIND" = "127.0.0.1"
+        "AGENT_API_PORT" = "8808"
+        "EDGE_USE_PYTHONW" = "0"
+        "EDGE_START_MEDIAMTX" = "0"
+        "EDGE_EVENT_DEDUPE_SECONDS" = "600"
+        "EDGE_VIDEOLOSS_CONFIRM_SECONDS" = "15"
+        "EDGE_RECOVERY_CONFIRM_SECONDS" = "10"
+        "EDGE_VIDEOLOSS_MIN_SECONDS" = "30"
+        "EDGE_NOTIFY_RECOVERY" = "0"
+        "EDGE_SUPPRESS_EVENT_TYPES" = ""
+        "STREAM_RESTART_COOLDOWN_SECONDS" = "60"
+        "STREAM_MAX_RETRIES" = "0"
+        "STREAM_RETRY_MAX_BACKOFF_SECONDS" = "60"
+    }
+
+    foreach ($k2 in $defaults.Keys) {
+        if (!($envMap.ContainsKey($k2))) { $envMap[$k2] = $defaults[$k2] }
+    }
+
+    $envMap["INGEST_API_URL"] = $ingest
+    $envMap["COLLECTOR_KEY"] = $key
+    if ($cid) {
+        $envMap["CLIENT_ID"] = $cid
+    }
+
+    $rx = '^\s*(' + (($controlledKeys | ForEach-Object { [Regex]::Escape($_) }) -join '|') + ')\s*='
+    $outLines = @()
+    $outLines += ($lines | Where-Object { $_ -notmatch $rx })
+    $outLines += $missingExampleLines
+    $outLines += "INGEST_API_URL=$($envMap['INGEST_API_URL'])"
+    $outLines += "COLLECTOR_KEY=$($envMap['COLLECTOR_KEY'])"
+    if ($envMap.ContainsKey("CLIENT_ID") -and $envMap["CLIENT_ID"]) { $outLines += "CLIENT_ID=$($envMap['CLIENT_ID'])" }
+    foreach ($k3 in @(
+        "ENABLE_STREAMING",
+        "ENABLE_RTSP_MONITOR",
+        "AGENT_API_BIND",
+        "AGENT_API_PORT",
+        "EDGE_USE_PYTHONW",
+        "EDGE_START_MEDIAMTX",
+        "EDGE_EVENT_DEDUPE_SECONDS",
+        "EDGE_VIDEOLOSS_CONFIRM_SECONDS",
+        "EDGE_RECOVERY_CONFIRM_SECONDS",
+        "EDGE_VIDEOLOSS_MIN_SECONDS",
+        "EDGE_NOTIFY_RECOVERY",
+        "EDGE_SUPPRESS_EVENT_TYPES",
+        "STREAM_RESTART_COOLDOWN_SECONDS",
+        "STREAM_MAX_RETRIES",
+        "STREAM_RETRY_MAX_BACKOFF_SECONDS"
+    )) {
+        $outLines += "$k3=$($envMap[$k3])"
+    }
+
+    [System.IO.File]::WriteAllLines($envPath, $outLines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Ensure-Venv([string]$edgeDir) {
@@ -668,7 +840,16 @@ function Ensure-Venv([string]$edgeDir) {
     if (!(Test-Path $py)) {
         Write-Inf "Criando ambiente virtual..."
         $basePy = $script:PythonExe
+        if ($basePy -and ($basePy -ne "python") -and !(Test-Path $basePy)) {
+            Write-Wrn "Python configurado não existe: $basePy. Tentando reinstalar/reencontrar..."
+            $script:PythonExe = ""
+            Ensure-Python
+            $basePy = $script:PythonExe
+        }
         if (!$basePy) { $basePy = "python" }
+        if (($basePy -ne "python") -and !(Test-Path $basePy)) {
+            throw "Python não encontrado em: $basePy"
+        }
         try { Remove-Item $venv -Recurse -Force -ErrorAction SilentlyContinue } catch {}
         & $basePy -m venv $venv | Out-Null
         if (!(Test-Path $py)) {
@@ -698,6 +879,8 @@ function Ensure-Venv([string]$edgeDir) {
     if ($wheelhouse -and (Test-Path $wheelhouse)) {
         & $py -m pip --version | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "pip não disponível na venv." }
+        & $py -m pip install --no-index --find-links $wheelhouse --upgrade pip setuptools wheel build | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Wheelhouse incompleto (pip/setuptools/wheel/build). Regenere o bundle offline." }
         & $py -m pip install --no-index --find-links $wheelhouse -r $req | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar requirements do Edge (offline)." }
         if ($installAI) {
@@ -736,8 +919,14 @@ sizes = [(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
 img.save(dst, format='ICO', sizes=sizes)
 "@
     & $py -c $code | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar .ico (Pillow/arquivo fonte)." }
-    if (!(Test-Path $dst)) { throw "Falha ao gerar ícone: $dst" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Wrn "Não foi possível gerar o ícone (.ico). A instalação continuará sem ícone (Pillow/arquivo fonte)."
+        return
+    }
+    if (!(Test-Path $dst)) {
+        Write-Wrn "Não foi possível gerar o ícone (.ico). A instalação continuará sem ícone: $dst"
+        return
+    }
 }
 
 function Ensure-Shortcuts([string]$installDir) {
@@ -754,14 +943,12 @@ function Ensure-Shortcuts([string]$installDir) {
     if (!(Test-Path $icon)) { Ensure-Icon $installDir }
     $shell = New-Object -ComObject WScript.Shell
     $lnk1 = $shell.CreateShortcut((Join-Path $desktop "ETI SENTINEL.lnk"))
-    $lnk1 = $shell.CreateShortcut((Join-Path $desktop "ETI SENTINEL.lnk"))
     $lnk1.TargetPath = "explorer.exe"
     $lnk1.Arguments = $localUrl
     $lnk1.WorkingDirectory = $installDir
     $lnk1.Description = "ETI SENTINEL - Abrir Painel Local"
     if (Test-Path $icon) { $lnk1.IconLocation = "$icon,0" }
     $lnk1.Save()
-    $lnk2 = $shell.CreateShortcut((Join-Path $folder "ETI SENTINEL.lnk"))
     $lnk2 = $shell.CreateShortcut((Join-Path $folder "ETI SENTINEL.lnk"))
     $lnk2.TargetPath = "explorer.exe"
     $lnk2.Arguments = $localUrl
