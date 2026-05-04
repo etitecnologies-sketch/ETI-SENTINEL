@@ -21,6 +21,8 @@ import SolarDashboard from './components/SolarDashboard';
 import HealthDashboard from './components/HealthDashboard';
 import MetricCard from './components/MetricCard';
 import MetricChart from './components/MetricChart';
+import DashboardUniFi from './pages/DashboardUniFi';
+import TopologyUniFi from './pages/TopologyUniFi';
 
 // Error Boundary para evitar tela branca total
 class ErrorBoundary extends Component {
@@ -3079,6 +3081,56 @@ function NexusApp() {
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 6000);
   }, []);
 
+  const VALID_PAGES = useMemo(
+    () =>
+      new Set([
+        "dashboard",
+        "topology",
+        "clients",
+        "devices",
+        "cameras",
+        "scanner",
+        "triggers",
+        "alerts",
+        "events",
+        "solar",
+        "health",
+      ]),
+    []
+  );
+
+  const pageFromHash = useCallback((hash) => {
+    const raw = String(hash || "").trim();
+    const p = raw.replace(/^#\/?/, "").toLowerCase();
+    if (!p) return null;
+    if (p === "topologia") return "topology";
+    if (!VALID_PAGES.has(p)) return null;
+    return p;
+  }, [VALID_PAGES]);
+
+  const hashFromPage = useCallback((p) => {
+    const pageId = String(p || "dashboard");
+    if (pageId === "topology") return "#/topologia";
+    return `#/${pageId}`;
+  }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    const apply = () => {
+      const next = pageFromHash(window.location.hash);
+      if (next && next !== page) setPage(next);
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, [authed, page, pageFromHash]);
+
+  useEffect(() => {
+    if (!authed) return;
+    const nextHash = hashFromPage(page);
+    if (window.location.hash !== nextHash) window.location.hash = nextHash;
+  }, [authed, hashFromPage, page]);
+
   useEffect(() => {
     const raw = import.meta.env.VITE_WS_URL || "";
     const wsUrl = raw.replace(/["'`\s]/g, "").trim().replace(/\/$/, "");
@@ -3135,6 +3187,7 @@ function NexusApp() {
   const NAV_SUPERADMIN = [
     { section: "MENU PRINCIPAL" },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "topology", label: "Topologia", icon: LayoutGrid },
     { id: "clients", label: "Clientes", icon: Users },
     { id: "devices", label: "Devices", icon: Server },
     { id: "cameras", label: "Câmeras", icon: Camera },
@@ -3149,6 +3202,7 @@ function NexusApp() {
   const NAV_CLIENT = [
     { section: "MENU" },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "topology", label: "Topologia", icon: LayoutGrid },
     { id: "devices", label: "Devices", icon: Server },
     { id: "cameras", label: "Câmeras", icon: Camera },
     { id: "scanner", label: "Scanner", icon: RefreshCw },
@@ -3161,7 +3215,8 @@ function NexusApp() {
   const NAV = isSuperAdmin ? NAV_SUPERADMIN : NAV_CLIENT;
 
   const PAGES = {
-    dashboard: <Dashboard userRole={userRole} />,
+    dashboard: <DashboardUniFi api={api} onToast={addToast} onGoTopology={() => setPage('topology')} />,
+    topology: <TopologyUniFi api={api} onToast={addToast} canAdmin={canRecord} />,
     clients:   <ClientsPage />,
     devices:   <DevicesPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
     cameras:   <VideoGrid />,

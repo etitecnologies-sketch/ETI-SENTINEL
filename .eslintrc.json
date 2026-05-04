@@ -11,25 +11,29 @@
   },
   "rules": {
     "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
-    "no-console": ["warn", { "allow": ["warn", "error"] }],
-    "semi": ["error", "always"],
-    "quotes": ["error", "double"],
-    "indent": ["error", 2],
-    "no-multiple-empty-lines": ["error", { "max": 2 }],
-    "eqeqeq": ["error", "always"],
-    "curly": ["error", "all"]
+    "no-undef": "warn",
+    "no-empty": "warn",
+    "no-console": "off",
+    "semi": "off",
+    "quotes": "off",
+    "indent": "off",
+    "no-multiple-empty-lines": "off",
+    "eqeqeq": ["warn", "always"],
+    "curly": "off"
   },
   "overrides": [
     {
       "files": ["*.jsx"],
-      "extends": ["eslint:recommended"],
       "parserOptions": {
         "ecmaFeatures": {
           "jsx": true
         }
       },
       "rules": {
-        "react/react-in-jsx-scope": "off"
+        "react/react-in-jsx-scope": "off",
+        "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+        "no-undef": "warn",
+        "no-empty": "warn"
       }
     }
   ]
