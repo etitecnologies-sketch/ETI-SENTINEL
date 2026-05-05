@@ -2373,11 +2373,10 @@ app.post("/push", metricsLimiter, async (req, res) => {
         c.wa_number
       FROM devices d
       LEFT JOIN clients c ON c.id = d.client_id
-      WHERE d.token=$1
-         OR d.serial_number = $1
-         OR UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $2
+      WHERE (d.token=$1 OR d.serial_number = $1 OR UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $2)
+        AND ($3::int IS NULL OR d.client_id = $3)
       LIMIT 1
-    `, [token, cleanToken]);
+    `, [token, cleanToken, body.client_id || req.query.client_id || null]);
 
     if (dr.rows.length === 0) {
     console.log(`[Push] Token/MAC/SN não encontrado: ${maskTokenLike(token)}`);
@@ -2420,24 +2419,15 @@ app.post("/push", metricsLimiter, async (req, res) => {
 
     // 3. WebSocket (Realtime)
     if (WEBSOCKET_URL) {
+      // Broadcast para o dashboard saber que o dispositivo está online
       fetch(`${WEBSOCKET_URL.replace(/\/$/, "")}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: finalEventType && !isEdgeHeartbeat ? "EVENT" : "METRIC",
+          type: "METRIC",
           device_id: dev.id,
           client_id: dev.client_id,
-          name: dev.name,
           status: "online",
-          latency_ms: finalLatency,
-          solar: {
-            voltage: solar_voltage,
-            battery_voltage: battery_voltage,
-            battery_percent: battery_percent,
-            charge_current: charge_current,
-            load_current: load_current
-          },
-          event: finalEventType && !isEdgeHeartbeat ? { type: finalEventType, channel: finalChannel, description: finalDescription } : null,
           time: new Date().toISOString()
         }),
       }).catch(() => {});
