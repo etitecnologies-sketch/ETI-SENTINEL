@@ -28,7 +28,7 @@ def now_display():
 
 DATABASE_URL    = sanitize(os.environ.get("DATABASE_URL", ""))
 EVAL_INTERVAL   = int(os.getenv("EVAL_INTERVAL", "1")) # Ciclo ultra-rápido: 1s
-OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "30")) # Timeout mais equilibrado: 30s (ajustado de 10s para evitar alertas falsos)
+OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "120")) # Aumentado para 120s para evitar quedas falsas por oscilação de rede
 ALERT_COOLDOWN  = int(os.getenv("ALERT_COOLDOWN", "60"))
 PING_TIMEOUT    = int(os.getenv("PING_TIMEOUT", "2"))
 PING_COUNT      = int(os.getenv("PING_COUNT", "1"))

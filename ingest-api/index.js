@@ -902,7 +902,7 @@ app.get("/devices", auth, async (req, res) => {
         (SELECT latency_ms FROM metrics WHERE device_id=d.id ORDER BY time DESC LIMIT 1) as last_latency,
         (SELECT cpu FROM metrics WHERE device_id=d.id ORDER BY time DESC LIMIT 1) as last_cpu,
         (SELECT memory FROM metrics WHERE device_id=d.id ORDER BY time DESC LIMIT 1) as last_memory,
-        (SELECT status FROM metrics WHERE device_id=d.id ORDER BY time DESC LIMIT 1) as last_status
+        d.status as last_status
       FROM devices d
       LEFT JOIN clients c ON c.id = d.client_id
       WHERE 1=1
@@ -1295,6 +1295,26 @@ app.get("/collector/devices", async (req, res) => {
   } catch (e) {
     console.error("/collector/devices error:", e.message);
     res.status(500).json({ error: "Failed to fetch devices", detail: e.message });
+  }
+});
+
+app.post("/collector/heartbeat", async (req, res) => {
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+
+  try {
+    const cid = authz.client_id;
+    // O agente envia métricas de saúde dele mesmo aqui
+    // Podemos usar isso para saber que o Agente de Borda está online
+    // e atualizar todos os devices 'monitor_agent' desse cliente que estão 'online' no banco
+    await pool.query(
+      "UPDATE clients SET collector_key_rotated_at=NOW() WHERE id=$1",
+      [cid]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("/collector/heartbeat error:", e.message);
+    res.status(500).json({ error: "Failed to process heartbeat" });
   }
 });
 

@@ -88,14 +88,21 @@ def _fetch_devices(ingest_api_url: str, collector_key: str, client_id: Optional[
     return r.json() or []
 
 
-def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float) -> None:
+def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_id: Optional[int] = None) -> None:
     edge_push = _sanitize(os.getenv("EDGE_PUSH_URL"))
     url = edge_push or (ingest_api_url.rstrip("/") + "/push")
-    payload = {"token": token, "event_type": "edge_heartbeat", "severity": "info", "latency": latency_ms}
+    payload = {
+        "token": token,
+        "event_type": "edge_heartbeat",
+        "severity": "info",
+        "latency": latency_ms
+    }
+    if client_id:
+        payload["client_id"] = client_id
     requests.post(url, json=payload, headers={"x-event-source": "edge-device-monitor"}, timeout=8)
 
 
-def _check_one(dev: Dict[str, Any], ingest_api_url: str) -> Tuple[int, str, bool, float]:
+def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int] = None) -> Tuple[int, str, bool, float]:
     device_id = int(dev.get("device_id") or 0)
     token = _sanitize(dev.get("token"))
     name = _sanitize(dev.get("name")) or f"device-{device_id}"
@@ -115,7 +122,7 @@ def _check_one(dev: Dict[str, Any], ingest_api_url: str) -> Tuple[int, str, bool
 
     if alive and token:
         try:
-            _push_heartbeat(ingest_api_url, token, latency_ms)
+            _push_heartbeat(ingest_api_url, token, latency_ms, client_id)
         except Exception:
             pass
 
@@ -151,7 +158,7 @@ def main() -> None:
 
         ok_count = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-            futures = [ex.submit(_check_one, d, ingest_api_url) for d in devices]
+            futures = [ex.submit(_check_one, d, ingest_api_url, client_id_int) for d in devices]
             for f in concurrent.futures.as_completed(futures):
                 try:
                     device_id, name, alive, latency_ms = f.result()
