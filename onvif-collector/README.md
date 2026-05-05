@@ -4,7 +4,7 @@ Esse serviço lê eventos ONVIF (PullPoint) de DVR/NVR/Câmeras e envia para o p
 
 ## Configuração
 
-1. Copie [config.example.json](file:///c:/Users/EZEQUIEL%20LIMA%20GUIDA/Desktop/monitoring-system/onvif-collector/config.example.json) para `config.json`
+1. Copie [config.example.json](./onvif-collector/config.example.json) para `config.json`
 2. Preencha `host`, `port`, `username`, `password` e principalmente o `token` (o token do device já cadastrado no sistema)
 
 ## Modo remoto (configurar tudo pelo sistema)

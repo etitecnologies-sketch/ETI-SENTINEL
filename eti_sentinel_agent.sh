@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ETI SENTINEL Universal Agent (Shell Edition)
-# Uso: ./nexuswatch_agent.sh <URL_API> <TOKEN_OU_MAC> [INTERVALO_SEGUNDOS]
+# Uso: ./eti_sentinel_agent.sh <URL_API> <TOKEN_OU_MAC> [INTERVALO_SEGUNDOS]
 
 API_URL=$1
 TOKEN=$2

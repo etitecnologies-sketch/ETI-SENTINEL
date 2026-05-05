@@ -5,7 +5,7 @@ import psycopg2
 import concurrent.futures
 
 print("==================================================")
-print(">>> NEXUSWATCH PROCESSOR STARTING UP... <<<")
+print(">>> ETI SENTINEL PROCESSOR STARTING UP... <<<")
 print(f">>> TIME: {datetime.datetime.now()} <<<")
 print("==================================================")
 

@@ -1,5 +1,5 @@
 -- ============================================================
---  NexusWatch Pro — Migration Multi-tenant
+--  ETI SENTINEL Pro — Migration Multi-tenant
 --  Execute: docker compose exec db psql -U monitor -d monitoring -f /migration_multitenant.sql
 -- ============================================================
 
@@ -50,4 +50,4 @@ UPDATE triggers SET client_id = (SELECT id FROM clients LIMIT 1) WHERE client_id
 -- Marcar usuário admin como superadmin
 UPDATE users SET role = 'superadmin' WHERE client_id IS NULL;
 
-SELECT 'Migration NexusWatch Pro Multi-tenant concluída!' as resultado;
+SELECT 'Migration ETI SENTINEL Pro Multi-tenant concluída!' as resultado;

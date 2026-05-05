@@ -4,7 +4,7 @@ import { etiTheme, clamp, timeAgoPtBR } from "../eti/theme";
 import { Button, Card, Pill, Segmented } from "../components/eti/EtiUI";
 import { genSeries, InternetActivityCard, MiniList } from "./dashboard/dashboardParts";
 
-export default function DashboardUniFi({ api, onToast, onGoTopology }) {
+export default function DashboardEti({ api, onToast, onGoTopology }) {
   const [tab, setTab] = useState("internet");
   const [wan, setWan] = useState("all");
   const [showInternet, setShowInternet] = useState(true);
@@ -141,7 +141,7 @@ export default function DashboardUniFi({ api, onToast, onGoTopology }) {
           </div>
           <div>
             <div style={{ fontSize: 20, fontWeight: 950, letterSpacing: "0.05em" }}>Network</div>
-            <div style={{ fontSize: 12, color: etiTheme.colors.text3 }}>Dashboard ETI • inspirado no UniFi • última atualização {timeAgoPtBR(lastUpdatedAt)}</div>
+            <div style={{ fontSize: 12, color: etiTheme.colors.text3 }}>Dashboard ETI • ETI SENTINEL • última atualização {timeAgoPtBR(lastUpdatedAt)}</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>

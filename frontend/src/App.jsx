@@ -21,8 +21,8 @@ import SolarDashboard from './components/SolarDashboard';
 import HealthDashboard from './components/HealthDashboard';
 import MetricCard from './components/MetricCard';
 import MetricChart from './components/MetricChart';
-import DashboardUniFi from './pages/DashboardUniFi';
-import TopologyUniFi from './pages/TopologyUniFi';
+import DashboardEti from './pages/DashboardEti';
+import TopologyEti from './pages/TopologyEti';
 
 // Error Boundary para evitar tela branca total
 class ErrorBoundary extends Component {
@@ -284,7 +284,7 @@ const DEVICE_TYPES = [
   { value: "router",      label: "Roteador",    icon: "🌐" },
   { value: "switch",      label: "Switch",      icon: "🔀" },
   { value: "routerboard", label: "RouterBoard", icon: "📡" },
-  { value: "unifi",       label: "UniFi",       icon: "📶" },
+  { value: "unifi",       label: "ETI SENTINEL", icon: "📶" },
   { value: "firewall",    label: "Firewall",    icon: "🛡️" },
   { value: "printer",     label: "Impressora",  icon: "🖨️" },
   { value: "iot",         label: "IoT",         icon: "💡" },
@@ -3216,8 +3216,8 @@ function NexusApp() {
   const NAV = isSuperAdmin ? NAV_SUPERADMIN : NAV_CLIENT;
 
   const PAGES = {
-    dashboard: <DashboardUniFi api={api} onToast={addToast} onGoTopology={() => setPage('topology')} />,
-    topology: <TopologyUniFi api={api} onToast={addToast} canAdmin={canRecord} />,
+    dashboard: <DashboardEti api={api} onToast={addToast} onGoTopology={() => setPage('topology')} />,
+    topology: <TopologyEti api={api} onToast={addToast} canAdmin={canRecord} />,
     clients:   <ClientsPage />,
     devices:   <DevicesPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
     cameras:   <VideoGrid />,

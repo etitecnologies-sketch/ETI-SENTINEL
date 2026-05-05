@@ -1,7 +1,7 @@
 import os, time, logging, requests, subprocess, socket
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger('ETI-SENTINEL-ETITECNOLOGIES')
+logger = logging.getLogger('ETI-SENTINEL-AGENT')
 
 INGEST_URL   = os.getenv('INGEST_URL', 'https://monitoring-system-production-1e5a.up.railway.app/metrics')
 DEVICE_TOKEN = os.getenv('DEVICE_TOKEN', '')

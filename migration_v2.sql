@@ -1,5 +1,5 @@
 -- ============================================================
---  NexusWatch — Migration v2
+--  ETI SENTINEL — Migration v2
 --  Execute: docker compose exec db psql -U monitor -d monitoring -f /migration_v2.sql
 -- ============================================================
 
@@ -46,4 +46,4 @@ BEGIN
   END;
 END $$;
 
-SELECT 'Migration NexusWatch v2 concluída com sucesso!' as resultado;
+SELECT 'Migration ETI SENTINEL v2 concluída com sucesso!' as resultado;

@@ -79,7 +79,7 @@ Gerar também ZIP:
 
 ## Checklist
 
-Use o checklist rápido em [CHECKLIST.md](file:///c:/Users/EZEQUIEL%20LIMA%20GUIDA/Desktop/ETI%20SENTINEL/instalador-campo/CHECKLIST.md).
+Use o checklist rápido em [CHECKLIST.md](./instalador-campo/CHECKLIST.md).
 
 ## Observação importante
 

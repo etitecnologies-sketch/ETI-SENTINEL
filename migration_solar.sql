@@ -1,5 +1,5 @@
 -- ============================================================
---  NexusWatch Pro — Migration Solar
+--  ETI SENTINEL Pro — Migration Solar
 --  Execute: docker compose exec db psql -U monitor -d monitoring -f /migration_solar.sql
 -- ============================================================
 
@@ -97,4 +97,4 @@ CREATE INDEX IF NOT EXISTS idx_solar_inverters_client ON solar_inverters(client_
 CREATE INDEX IF NOT EXISTS idx_solar_metrics_inverter ON solar_metrics(inverter_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_solar_metrics_client   ON solar_metrics(client_id, time DESC);
 
-SELECT 'Migration Solar NexusWatch Pro concluída!' as resultado;
+SELECT 'Migration Solar ETI SENTINEL Pro concluída!' as resultado;

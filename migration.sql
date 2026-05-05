@@ -1,5 +1,5 @@
 -- ============================================================
---  NexusWatch — Migration: device_type, tags, config fields
+--  ETI SENTINEL — Migration: device_type, tags, config fields
 --  Execute: docker compose exec db psql -U monitor -d monitoring -f /migration.sql
 -- ============================================================
 
@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_devices_tags ON devices USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_devices_ip   ON devices(ip_address);
 
 -- ── Tipos disponíveis (comentário referência) ─────────────
--- server | camera | router | switch | routerboard | unifi
+-- server | camera | router | switch | routerboard | eti_sentinel
 -- firewall | printer | iot | workstation | other
 
-SELECT 'Migration NexusWatch concluída com sucesso!' as resultado;
+SELECT 'Migration ETI SENTINEL concluída com sucesso!' as resultado;

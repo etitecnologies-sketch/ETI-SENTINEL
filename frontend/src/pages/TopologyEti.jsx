@@ -7,7 +7,7 @@ import TopologyCanvas from "./topology/TopologyCanvas";
 import TopologyDrawer from "./topology/TopologyDrawer";
 import TopologyFilters from "./topology/TopologyFilters";
 
-export default function TopologyUniFi({ api, onToast, canAdmin }) {
+export default function TopologyEti({ api, onToast, canAdmin }) {
   const [mode, setMode] = useState("topology");
   const [devices, setDevices] = useState([]);
   const [filters, setFilters] = useState({
@@ -76,7 +76,7 @@ export default function TopologyUniFi({ api, onToast, canAdmin }) {
           </div>
           <div>
             <div style={{ fontSize: 20, fontWeight: 950, letterSpacing: "0.05em" }}>Topologia</div>
-            <div style={{ fontSize: 12, color: etiTheme.colors.text3 }}>Mapa de devices e CFTV • inspirado no UniFi • ETI Sentinel</div>
+            <div style={{ fontSize: 12, color: etiTheme.colors.text3 }}>Mapa de devices e CFTV • ETI SENTINEL</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
