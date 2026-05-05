@@ -315,6 +315,7 @@ def main() -> None:
 
     gateway_ip = get_gateway_ip()
     logging.info(f"Gateway Detectado: {gateway_ip}")
+    os.environ["INTERNAL_GATEWAY_IP"] = gateway_ip
 
     # Executa o diagnóstico interno antes de subir os serviços para mapear os binários
     check_rc = run_check(here, env)

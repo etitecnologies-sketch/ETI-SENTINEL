@@ -66,7 +66,8 @@ class APIClient:
             payload = {
                 "client_id": CLIENT_ID,
                 "metrics": metrics,
-                "streams_active": []
+                "streams_active": [],
+                "gateway_ip": os.getenv("INTERNAL_GATEWAY_IP") or "127.0.0.1"
             }
             self.session.post(
                 f"{API_URL}/collector/heartbeat",

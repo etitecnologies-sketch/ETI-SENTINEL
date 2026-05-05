@@ -91,23 +91,29 @@ def _fetch_devices(ingest_api_url: str, collector_key: str, client_id: Optional[
 def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_id: Optional[int] = None, is_gateway: bool = False, ip_address: Optional[str] = None) -> None:
     edge_push = _sanitize(os.getenv("EDGE_PUSH_URL"))
     url = edge_push or (ingest_api_url.rstrip("/") + "/push")
+    
+    # Se não houver token, usamos o IP, mas precisamos do client_id para isolamento
+    identifier = token or ip_address
+    
     payload = {
-        "token": token or ip_address, # Fallback para IP se o token sumir
+        "token": identifier,
         "ip_address": ip_address,
+        "client_id": client_id,
         "event_type": "edge_heartbeat",
         "severity": "info",
         "latency": latency_ms
     }
-    if client_id:
-        payload["client_id"] = client_id
+    
     if is_gateway:
         payload["is_gateway"] = True
         payload["event_type"] = "gateway_heartbeat"
 
     try:
-        r = requests.post(url, json=payload, headers={"x-event-source": "edge-device-monitor"}, timeout=8)
+        # Importante: enviamos o client_id tanto no payload quanto na query para garantir
+        params = {"client_id": client_id} if client_id else {}
+        r = requests.post(url, json=payload, params=params, headers={"x-event-source": "edge-device-monitor"}, timeout=8)
         if r.status_code != 200:
-            logging.error(f"Erro ao enviar heartbeat para {ip_address}: {r.status_code} {r.text}")
+            logging.error(f"Erro ao enviar heartbeat para {ip_address} (ID: {identifier}): {r.status_code} {r.text}")
     except Exception as e:
         logging.error(f"Falha de conexão ao enviar heartbeat para {ip_address}: {e}")
 

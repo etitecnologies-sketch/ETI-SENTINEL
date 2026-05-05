@@ -939,6 +939,11 @@ app.post("/devices", auth, async (req, res) => {
   if (!name) return res.status(400).json({ error: "Name required" });
   const cid = req.user.role === "superadmin" ? (client_id || null) : req.user.client_id;
   const token = crypto.randomBytes(32).toString("hex");
+  
+  // Normalização de MAC e Serial ao salvar
+  const cleanMac = mac_address ? String(mac_address).replace(/[:-]/g, "").toUpperCase() : "";
+  const cleanSN = serial_number ? String(serial_number).replace(/[:-]/g, "").toUpperCase() : "";
+
   try {
     const r = await pool.query(`
       INSERT INTO devices (
@@ -952,7 +957,7 @@ app.post("/devices", auth, async (req, res) => {
       name, description||"", location||"", token, device_type||"other", ip_address||"", tags||[], 
       ddns_address||"", parseInt(monitor_port)||0, monitor_ping!==false, monitor_agent!==false, ai_enabled===true, notes||"", cid,
       snmp_community||"public", snmp_version||"2c", ssh_user||"", parseInt(ssh_port)||22,
-      mac_address||"", serial_number||""
+      cleanMac, cleanSN
     ]);
     res.status(201).json(r.rows[0]);
     if (ddns_address && monitor_port) setImmediate(() => cloudMonitor(r.rows[0].id));
@@ -968,6 +973,11 @@ app.put("/devices/:id", auth, async (req, res) => {
     ai_enabled
   } = req.body;
   const cid = req.user.role === "superadmin" ? (client_id || null) : req.user.client_id;
+  
+  // Normalização de MAC e Serial ao atualizar
+  const cleanMac = mac_address ? String(mac_address).replace(/[:-]/g, "").toUpperCase() : "";
+  const cleanSN = serial_number ? String(serial_number).replace(/[:-]/g, "").toUpperCase() : "";
+
   try {
     const r = await pool.query(`
       UPDATE devices SET 
@@ -980,7 +990,7 @@ app.put("/devices/:id", auth, async (req, res) => {
       name, description||"", location||"", device_type||"other", ip_address||"", tags||[], 
       ddns_address||"", parseInt(monitor_port)||0, monitor_ping!==false, monitor_agent!==false, ai_enabled===true, notes||"",
       snmp_community||"public", snmp_version||"2c", ssh_user||"", parseInt(ssh_port)||22,
-      mac_address||"", serial_number||"", cid,
+      cleanMac, cleanSN, cid,
       req.params.id
     ]);
     res.json(r.rows[0]);
@@ -1317,13 +1327,30 @@ app.post("/collector/heartbeat", async (req, res) => {
 
   try {
     const cid = authz.client_id;
-    // O agente envia métricas de saúde dele mesmo aqui
-    // Podemos usar isso para saber que o Agente de Borda está online
-    // e atualizar todos os devices 'monitor_agent' desse cliente que estão 'online' no banco
+    const gatewayIp = req.body?.gateway_ip;
+    
+    // 1. Atualiza a data de rotação/atividade do cliente
     await pool.query(
       "UPDATE clients SET collector_key_rotated_at=NOW() WHERE id=$1",
       [cid]
     );
+
+    // 2. Se o agente enviou o IP do Gateway real, atualizamos o dispositivo do tipo router/gateway
+    if (gatewayIp && gatewayIp !== "127.0.0.1") {
+      await pool.query(
+        `UPDATE devices SET ip_address=$1, last_seen=NOW(), status='online' 
+         WHERE client_id=$2 AND (device_type='router' OR device_type='routerboard' OR device_type='gateway')`,
+        [gatewayIp, cid]
+      );
+    }
+
+    // 3. Marca todos os dispositivos 'monitor_agent' desse cliente como online, 
+    // pois o agente que os monitora acabou de se reportar.
+    await pool.query(
+      "UPDATE devices SET last_seen=NOW(), status='online' WHERE client_id=$1 AND monitor_agent=TRUE",
+      [cid]
+    );
+
     res.json({ ok: true });
   } catch (e) {
     console.error("/collector/heartbeat error:", e.message);
@@ -2393,7 +2420,11 @@ app.post("/push", metricsLimiter, async (req, res) => {
   }
 
   try {
-    const cleanToken = String(token).replace(/[:-]/g, "").toUpperCase();
+    const rawToken = String(token || "").trim();
+    const cleanToken = rawToken.replace(/[:-]/g, "").toUpperCase();
+    const cidFromReq = body.client_id || req.query.client_id || null;
+
+    // Busca robusta: Token exato -> Serial Number -> MAC Address -> (IP + ClientID como fallback)
     const dr = await pool.query(`
       SELECT
         d.id,
@@ -2410,16 +2441,16 @@ app.post("/push", metricsLimiter, async (req, res) => {
       FROM devices d
       LEFT JOIN clients c ON c.id = d.client_id
       WHERE (
-        d.token=$1 
-        OR d.serial_number = $1 
+        d.token = $1 
+        OR UPPER(REPLACE(REPLACE(d.serial_number, ':', ''), '-', '')) = $2
         OR UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $2
         OR (d.ip_address = $1 AND d.client_id = $3)
       )
       LIMIT 1
-    `, [token, cleanToken, body.client_id || req.query.client_id || null]);
+    `, [rawToken, cleanToken, cidFromReq]);
 
     if (dr.rows.length === 0) {
-    console.log(`[Push] Token/MAC/SN não encontrado: ${maskTokenLike(token)}`);
+      console.log(`[Push] Identificação inválida: ${maskTokenLike(token)} (Clean: ${cleanToken})`);
       return res.status(401).json({ error: "Invalid identification" });
     }
     const dev = dr.rows[0];
