@@ -897,6 +897,21 @@ app.get("/auth/me", auth, (req, res) => res.json(req.user));
 app.get("/devices", auth, async (req, res) => {
   try {
     const cid = clientFilter(req);
+    const loc = sanitize(req.query.location || "");
+    
+    let where = "1=1";
+    const params = [];
+    
+    if (cid) {
+      params.push(cid);
+      where += ` AND d.client_id=$${params.length}`;
+    }
+    
+    if (loc) {
+      params.push(loc);
+      where += ` AND d.location=$${params.length}`;
+    }
+
     let query = `
       SELECT d.*, c.name as client_name,
         (SELECT latency_ms FROM metrics WHERE device_id=d.id ORDER BY time DESC LIMIT 1) as last_latency,
@@ -905,10 +920,8 @@ app.get("/devices", auth, async (req, res) => {
         d.status as last_status
       FROM devices d
       LEFT JOIN clients c ON c.id = d.client_id
-      WHERE 1=1
+      WHERE ${where}
     `;
-    const params = [];
-    if (cid) { params.push(cid); query += ` AND d.client_id=$1`; }
     query += " ORDER BY d.created_at DESC";
     const r = await pool.query(query, params);
     res.json(r.rows);
@@ -2551,13 +2564,45 @@ app.post("/metrics", metricsLimiter, async (req, res) => {
 // ── Utils ────────────────────────────────────────────────────
 app.get("/stats", auth, async (req, res) => {
   const cid = clientFilter(req);
-  const filter = cid ? `WHERE client_id=${cid}` : "";
-  const total = await pool.query(`SELECT COUNT(*) FROM devices ${filter}`);
-  const online = await pool.query(`SELECT COUNT(*) FROM devices ${filter ? (filter + " AND") : "WHERE"} status='online'`);
-  const clients = await pool.query("SELECT COUNT(*) FROM clients");
-  const totalCount = parseInt(total.rows[0].count);
-  const onlineCount = parseInt(online.rows[0].count);
-  res.json({ devices: totalCount, online: onlineCount, offline: totalCount - onlineCount, clients: parseInt(clients.rows[0].count) });
+  const loc = sanitize(req.query.location || "");
+  
+  let filter = cid ? `WHERE client_id=${cid}` : "";
+  if (loc) {
+    filter += (filter ? " AND " : " WHERE ") + `location = '${loc}'`;
+  }
+
+  try {
+    const total = await pool.query(`SELECT COUNT(*) FROM devices ${filter}`);
+    const online = await pool.query(`SELECT COUNT(*) FROM devices ${filter ? (filter + " AND") : "WHERE"} status='online'`);
+    const clients = await pool.query("SELECT COUNT(*) FROM clients");
+    
+    // Tenta pegar o IP do Gateway (primeiro roteador/routerboard do ponto)
+    const gateway = await pool.query(`SELECT ip_address FROM devices ${filter ? (filter + " AND") : "WHERE"} device_type IN ('router', 'routerboard') LIMIT 1`);
+    
+    const totalCount = parseInt(total.rows[0].count);
+    const onlineCount = parseInt(online.rows[0].count);
+    
+    res.json({ 
+      devices: totalCount, 
+      online: onlineCount, 
+      offline: totalCount - onlineCount, 
+      clients: parseInt(clients.rows[0].count),
+      gateway_ip: gateway.rows[0]?.ip_address || "127.0.0.1"
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/locations", auth, async (req, res) => {
+  const cid = clientFilter(req);
+  if (!cid) return res.json([]);
+  try {
+    const r = await pool.query("SELECT DISTINCT location FROM devices WHERE client_id=$1 AND location IS NOT NULL AND location != '' ORDER BY location", [cid]);
+    res.json(r.rows.map(x => x.location));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/tags", auth, async (req, res) => {

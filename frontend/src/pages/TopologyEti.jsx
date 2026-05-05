@@ -9,6 +9,8 @@ import TopologyFilters from "./topology/TopologyFilters";
 
 export default function TopologyEti({ api, onToast, canAdmin }) {
   const [mode, setMode] = useState("topology");
+  const [location, setLocation] = useState("");
+  const [locations, setLocations] = useState([]);
   const [devices, setDevices] = useState([]);
   const [filters, setFilters] = useState({
     showInternetTraffic: false,
@@ -27,10 +29,15 @@ export default function TopologyEti({ api, onToast, canAdmin }) {
   const [zoom, setZoom] = useState(1);
 
   const refresh = useCallback(() => {
-    api?.("/devices")
+    const locParam = location ? `?location=${encodeURIComponent(location)}` : "";
+    api?.(`/devices${locParam}`)
       .then((d) => setDevices(Array.isArray(d) ? d : []))
       .catch(() => setDevices([]));
-  }, [api]);
+    
+    api?.("/locations")
+      .then((d) => setLocations(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [api, location]);
 
   useEffect(() => {
     refresh();
@@ -80,6 +87,26 @@ export default function TopologyEti({ api, onToast, canAdmin }) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            style={{
+              height: 40,
+              borderRadius: 12,
+              padding: "0 12px",
+              background: "rgba(59, 158, 255, 0.12)",
+              border: `1px solid ${etiTheme.colors.cyan}44`,
+              color: etiTheme.colors.text,
+              fontWeight: 800,
+              letterSpacing: "0.06em",
+              marginRight: 10
+            }}
+          >
+            <option value="">🌎 Todos os Pontos</option>
+            {locations.map(loc => (
+              <option key={loc} value={loc}>📍 {loc}</option>
+            ))}
+          </select>
           <Segmented value={mode} options={[{ value: "topology", label: "Topology" }, { value: "infra", label: "Infrastructure" }]} onChange={setMode} />
           <Button variant="secondary" leftIcon={<RefreshCw size={16} />} onClick={refresh}>
             Atualizar
