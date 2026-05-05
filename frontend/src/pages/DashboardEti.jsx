@@ -115,6 +115,18 @@ export default function DashboardEti({ api, onToast, onGoTopology }) {
     ];
   }, [events]);
 
+  const runSpeedTest = async () => {
+    onToast?.("Speed Test", "Iniciando teste real no agente...", "info");
+    try {
+      // Notifica o agente via API (supondo que o agente tenha um endpoint exposto ou via WebSocket)
+      // Como o agente é quem deve iniciar, vamos enviar um comando para a Ingest API encaminhar
+      await api?.("/speedtest/run", { method: "POST" });
+      onToast?.("Speed Test", "Teste solicitado ao Agente de Borda. Aguarde os resultados.", "success");
+    } catch (e) {
+      onToast?.("Speed Test", "Erro ao solicitar teste: " + e.message, "error");
+    }
+  };
+
   const topApps = [
     { name: "Netflix" },
     { name: "Instagram" },
@@ -264,7 +276,7 @@ export default function DashboardEti({ api, onToast, onGoTopology }) {
               <Button
                 variant="secondary"
                 leftIcon={<Gauge size={16} />}
-                onClick={() => onToast?.("Speed Test", "Executar teste ISP (demo)", "info")}
+                onClick={runSpeedTest}
               >
                 Teste ISP
               </Button>

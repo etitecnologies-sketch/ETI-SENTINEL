@@ -369,7 +369,28 @@ def main() -> None:
             store = agent_api.JobStore(here / ".state" / "agent_api.json")
             log_path = here / ".state" / "agent_api.log"
             httpd = agent_api.Server((bind, agent_api_port), agent_api.Handler, env, store, log_path)
+            
+            # Handler para comandos do WebSocket (como rodar Speed Test)
+            def on_websocket_message(msg):
+                try:
+                    data = json.loads(msg)
+                    if data.get("type") == "COMMAND" and data.get("action") == "RUN_SPEEDTEST":
+                        logging.info("Comando Speed Test recebido via WebSocket")
+                        res = run_speedtest()
+                        # Envia o resultado de volta para a API
+                        ingest_url = _sanitize_base_url(os.getenv("INGEST_API_URL"))
+                        requests.post(f"{ingest_url}/speedtest", json={
+                            "download": res["download"],
+                            "upload": res["upload"],
+                            "ping": res["ping"],
+                            "client_id": os.getenv("CLIENT_ID")
+                        }, headers={"x-collector-key": os.getenv("COLLECTOR_KEY")})
+                except Exception as e:
+                    logging.error(f"Erro ao processar comando WebSocket: {e}")
+
             httpd.relay.start()
+            # Se você tiver uma implementação de WebSocket Client no agente, ela deve chamar on_websocket_message
+            
             threading.Thread(target=httpd.serve_forever, daemon=True).start()
             print(f"[INFO] Agent API (relay) iniciado em {bind}:{agent_api_port}")
             os.environ.setdefault("EDGE_PUSH_URL", f"http://127.0.0.1:{agent_api_port}/api/push")

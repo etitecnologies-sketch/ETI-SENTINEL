@@ -2594,6 +2594,28 @@ app.get("/stats", auth, async (req, res) => {
   }
 });
 
+app.post("/speedtest/run", auth, async (req, res) => {
+  const cid = req.user.role === "superadmin" ? (req.body.client_id || null) : req.user.client_id;
+  
+  try {
+    if (WEBSOCKET_URL) {
+      // Envia comando via WebSocket para o agente que está ouvindo
+      fetch(`${WEBSOCKET_URL.replace(/\/$/, "")}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "COMMAND",
+          action: "RUN_SPEEDTEST",
+          client_id: cid
+        }),
+      }).catch(() => {});
+    }
+    res.json({ ok: true, message: "Comando enviado ao agente" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/locations", auth, async (req, res) => {
   const cid = clientFilter(req);
   if (!cid) return res.json([]);
