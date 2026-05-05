@@ -173,6 +173,15 @@ class PushRelay:
         return list(reversed(out))
 
     def handle_event(self, payload: Dict[str, Any], source: str) -> Dict[str, Any]:
+        # BLOQUEIO PROFISSIONAL MULTITENANT
+        # Força o client_id do .env local para evitar vazamento de dados entre redes de clientes diferentes
+        env_client_id = sanitize(self.env.get("CLIENT_ID") or "")
+        if env_client_id:
+            try:
+                payload["client_id"] = int(env_client_id)
+            except:
+                pass
+
         ev = {
             "event_type": sanitize(payload.get("event_type") or ""),
             "channel": int(payload.get("channel") or 0) if str(payload.get("channel") or "").isdigit() else 0,
@@ -689,7 +698,16 @@ class PushRelay:
         url = self._ingest_url()
         if not url:
             return False
+        
+        # GARANTIA MULTITENANT: Força o client_id do agente antes de enviar para a nuvem
+        cid = self._client_id()
         safe_payload = dict(payload or {})
+        if cid:
+            try:
+                safe_payload["client_id"] = int(cid)
+            except:
+                pass
+        
         safe_payload.pop("snapshot_jpg_b64", None)
         try:
             r = self._sess.post(
@@ -722,12 +740,21 @@ class PushRelay:
         url = self._ingest_url()
         if not url:
             return
+        cid = self._client_id()
         keep = []
         for it in items:
             payload = it.get("payload") if isinstance(it, dict) else None
             src = it.get("source") if isinstance(it, dict) else ""
             if not isinstance(payload, dict):
                 continue
+            
+            # GARANTIA MULTITENANT NO FLUSH
+            if cid:
+                try:
+                    payload["client_id"] = int(cid)
+                except:
+                    pass
+
             try:
                 r = self._sess.post(
                     url + "/push",
