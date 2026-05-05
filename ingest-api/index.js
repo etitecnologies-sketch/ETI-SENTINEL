@@ -2605,6 +2605,39 @@ app.get("/locations", auth, async (req, res) => {
   }
 });
 
+app.post("/speedtest", auth, async (req, res) => {
+  const { download, upload, ping, client_id } = req.body;
+  const cid = req.user.role === "superadmin" ? (client_id || null) : req.user.client_id;
+  
+  try {
+    // Salva o teste no banco para histórico
+    await pool.query(
+      "INSERT INTO speedtests (client_id, download, upload, ping, time) VALUES ($1, $2, $3, $4, NOW())",
+      [cid, download, upload, ping]
+    );
+    
+    // Notifica o WebSocket para atualizar a tela do dashboard instantaneamente
+    if (WEBSOCKET_URL) {
+      fetch(`${WEBSOCKET_URL.replace(/\/$/, "")}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "SPEEDTEST",
+          client_id: cid,
+          download,
+          upload,
+          ping,
+          time: new Date().toISOString()
+        }),
+      }).catch(() => {});
+    }
+    
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/tags", auth, async (req, res) => {
   const r = await pool.query("SELECT DISTINCT unnest(tags) as tag FROM devices");
   res.json(r.rows.map(x => x.tag));

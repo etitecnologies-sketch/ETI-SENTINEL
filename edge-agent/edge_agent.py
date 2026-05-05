@@ -6,6 +6,8 @@ import time
 import threading
 import logging
 import ctypes
+import socket
+import struct
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -266,10 +268,53 @@ def run_check(here: Path, env: dict) -> int:
 
 
 
+def get_gateway_ip():
+    """Detecta o gateway da rede automaticamente ou usa o definido no .env"""
+    manual_gw = os.getenv("MANUAL_GATEWAY_IP")
+    if manual_gw:
+        return manual_gw
+    
+    try:
+        if os.name == 'nt': # Windows
+            import subprocess
+            cmd = "route print 0.0.0.0 | findstr 0.0.0.0"
+            out = subprocess.check_output(cmd, shell=True).decode()
+            parts = out.split()
+            if len(parts) >= 3:
+                return parts[2]
+        else: # Linux/Mac
+            with open("/proc/net/route") as fh:
+                for line in fh:
+                    fields = line.strip().split()
+                    if fields[1] == '00000000':
+                        return socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+    except:
+        pass
+    return "127.0.0.1"
+
+
+def run_speedtest():
+    """Executa um teste de velocidade real usando speedtest-cli"""
+    try:
+        import speedtest
+        s = speedtest.Speedtest()
+        s.get_best_server()
+        download = s.download() / 1_000_000 # Mbps
+        upload = s.upload() / 1_000_000 # Mbps
+        ping = s.results.ping
+        return {"download": round(download, 2), "upload": round(upload, 2), "ping": round(ping, 2)}
+    except Exception as e:
+        logging.error(f"Erro no SpeedTest: {e}")
+        return {"download": 0, "upload": 0, "ping": 0}
+
+
 def main() -> None:
     here = Path(__file__).resolve().parent
     load_dotenv(here / ".env", override=True)
     env = os.environ.copy()
+
+    gateway_ip = get_gateway_ip()
+    logging.info(f"Gateway Detectado: {gateway_ip}")
 
     # Executa o diagnóstico interno antes de subir os serviços para mapear os binários
     check_rc = run_check(here, env)
