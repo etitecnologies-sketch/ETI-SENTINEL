@@ -88,7 +88,7 @@ def _fetch_devices(ingest_api_url: str, collector_key: str, client_id: Optional[
     return r.json() or []
 
 
-def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_id: Optional[int] = None) -> None:
+def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_id: Optional[int] = None, is_gateway: bool = False) -> None:
     edge_push = _sanitize(os.getenv("EDGE_PUSH_URL"))
     url = edge_push or (ingest_api_url.rstrip("/") + "/push")
     payload = {
@@ -99,10 +99,14 @@ def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_i
     }
     if client_id:
         payload["client_id"] = client_id
+    if is_gateway:
+        payload["is_gateway"] = True
+        payload["event_type"] = "gateway_heartbeat"
+
     requests.post(url, json=payload, headers={"x-event-source": "edge-device-monitor"}, timeout=8)
 
 
-def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int] = None) -> Tuple[int, str, bool, float]:
+def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int] = None, manual_gateway_ip: Optional[str] = None) -> Tuple[int, str, bool, float]:
     device_id = int(dev.get("device_id") or 0)
     token = _sanitize(dev.get("token"))
     name = _sanitize(dev.get("name")) or f"device-{device_id}"
@@ -110,6 +114,13 @@ def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int
     ddns = _sanitize(dev.get("ddns_address"))
     monitor_ping = dev.get("monitor_ping") is True or _bool(dev.get("monitor_ping"))
     monitor_port = int(dev.get("monitor_port") or 0)
+    
+    # Verifica se este dispositivo é o gateway (manual ou pelo tipo)
+    is_gateway = False
+    if manual_gateway_ip and ip == manual_gateway_ip:
+        is_gateway = True
+    elif _sanitize(dev.get("device_type")).lower() in ["router", "routerboard", "gateway"]:
+        is_gateway = True
 
     alive = False
     latency_ms = 0.0
@@ -122,7 +133,7 @@ def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int
 
     if alive and token:
         try:
-            _push_heartbeat(ingest_api_url, token, latency_ms, client_id)
+            _push_heartbeat(ingest_api_url, token, latency_ms, client_id, is_gateway)
         except Exception:
             pass
 
@@ -140,6 +151,9 @@ def main() -> None:
     client_id_int = int(client_id) if client_id.isdigit() else None
     interval_seconds = int(os.getenv("DEVICE_INTERVAL_SECONDS") or 10)
     workers = int(os.getenv("DEVICE_WORKERS") or 30)
+    
+    # Lê o IP do Gateway Manual do .env
+    manual_gateway_ip = _sanitize(os.getenv("MANUAL_GATEWAY_IP"))
 
     if not collector_key:
         raise SystemExit("COLLECTOR_KEY obrigatório")
@@ -158,7 +172,7 @@ def main() -> None:
 
         ok_count = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-            futures = [ex.submit(_check_one, d, ingest_api_url, client_id_int) for d in devices]
+            futures = [ex.submit(_check_one, d, ingest_api_url, client_id_int, manual_gateway_ip) for d in devices]
             for f in concurrent.futures.as_completed(futures):
                 try:
                     device_id, name, alive, latency_ms = f.result()

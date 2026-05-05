@@ -2421,7 +2421,19 @@ app.post("/push", metricsLimiter, async (req, res) => {
 
     // 1. Atualizar Sinal de Vida (Heartbeat)
     // Atualizamos o last_seen e o status para online imediatamente para o Dashboard
-    await pool.query("UPDATE devices SET last_seen=NOW(), status='online' WHERE id=$1", [dev.id]);
+    const isGateway = body.is_gateway === true || body.event_type === "gateway_heartbeat";
+    
+    if (isGateway) {
+      // Se for gateway, podemos opcionalmente atualizar o IP do gateway do cliente no banco
+      // para que o Dashboard sempre mostre o IP real atualizado.
+      await pool.query(`
+        UPDATE devices 
+        SET last_seen=NOW(), status='online'
+        WHERE id=$1
+      `, [dev.id]);
+    } else {
+      await pool.query("UPDATE devices SET last_seen=NOW(), status='online' WHERE id=$1", [dev.id]);
+    }
     
     // Garante que o host existe na tabela hosts e pega o id
     const hr = await pool.query("INSERT INTO hosts (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id", [dev.name]);
