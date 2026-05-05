@@ -88,11 +88,12 @@ def _fetch_devices(ingest_api_url: str, collector_key: str, client_id: Optional[
     return r.json() or []
 
 
-def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_id: Optional[int] = None, is_gateway: bool = False) -> None:
+def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_id: Optional[int] = None, is_gateway: bool = False, ip_address: Optional[str] = None) -> None:
     edge_push = _sanitize(os.getenv("EDGE_PUSH_URL"))
     url = edge_push or (ingest_api_url.rstrip("/") + "/push")
     payload = {
-        "token": token,
+        "token": token or ip_address, # Fallback para IP se o token sumir
+        "ip_address": ip_address,
         "event_type": "edge_heartbeat",
         "severity": "info",
         "latency": latency_ms
@@ -103,7 +104,12 @@ def _push_heartbeat(ingest_api_url: str, token: str, latency_ms: float, client_i
         payload["is_gateway"] = True
         payload["event_type"] = "gateway_heartbeat"
 
-    requests.post(url, json=payload, headers={"x-event-source": "edge-device-monitor"}, timeout=8)
+    try:
+        r = requests.post(url, json=payload, headers={"x-event-source": "edge-device-monitor"}, timeout=8)
+        if r.status_code != 200:
+            logging.error(f"Erro ao enviar heartbeat para {ip_address}: {r.status_code} {r.text}")
+    except Exception as e:
+        logging.error(f"Falha de conexão ao enviar heartbeat para {ip_address}: {e}")
 
 
 def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int] = None, manual_gateway_ip: Optional[str] = None) -> Tuple[int, str, bool, float]:
@@ -131,9 +137,9 @@ def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int
     elif monitor_ping and ip:
         alive, latency_ms = _ping(ip, timeout_ms=1500)
 
-    if alive and token:
+    if alive and (token or ip):
         try:
-            _push_heartbeat(ingest_api_url, token, latency_ms, client_id, is_gateway)
+            _push_heartbeat(ingest_api_url, token, latency_ms, client_id, is_gateway, ip)
         except Exception:
             pass
 

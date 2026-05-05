@@ -2399,6 +2399,9 @@ app.post("/push", metricsLimiter, async (req, res) => {
         d.id,
         d.client_id,
         d.name,
+        d.token,
+        d.mac_address,
+        d.serial_number,
         c.telegram_token,
         c.telegram_chat_id,
         c.wa_instance,
@@ -2406,8 +2409,12 @@ app.post("/push", metricsLimiter, async (req, res) => {
         c.wa_number
       FROM devices d
       LEFT JOIN clients c ON c.id = d.client_id
-      WHERE (d.token=$1 OR d.serial_number = $1 OR UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $2)
-        AND ($3::int IS NULL OR d.client_id = $3)
+      WHERE (
+        d.token=$1 
+        OR d.serial_number = $1 
+        OR UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $2
+        OR (d.ip_address = $1 AND d.client_id = $3)
+      )
       LIMIT 1
     `, [token, cleanToken, body.client_id || req.query.client_id || null]);
 
