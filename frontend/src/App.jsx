@@ -3118,12 +3118,13 @@ function NexusApp() {
     if (!authed) return;
     const apply = () => {
       const next = pageFromHash(window.location.hash);
-      if (next && next !== page) setPage(next);
+      if (!next) return;
+      setPage((prev) => (prev === next ? prev : next));
     };
     apply();
     window.addEventListener("hashchange", apply);
     return () => window.removeEventListener("hashchange", apply);
-  }, [authed, page, pageFromHash]);
+  }, [authed, pageFromHash]);
 
   useEffect(() => {
     if (!authed) return;
