@@ -191,7 +191,8 @@ class PushRelay:
                 if not kk:
                     continue
                 lk = kk.lower()
-                if lk in {"token", "password", "pass"} or "token" in lk or "pass" in lk:
+                # Permitir token para encaminhamento à nuvem, mas ignorar senhas
+                if lk in {"password", "pass"} or "password" in lk or "pass" in lk:
                     continue
                 if kk in ev or kk.startswith("_"):
                     continue
