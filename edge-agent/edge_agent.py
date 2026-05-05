@@ -269,27 +269,45 @@ def run_check(here: Path, env: dict) -> int:
 
 
 def get_gateway_ip():
-    """Detecta o gateway da rede automaticamente ou usa o definido no .env"""
+    """Detecta o gateway da rede diretamente da máquina de forma robusta"""
     manual_gw = os.getenv("MANUAL_GATEWAY_IP")
     if manual_gw:
         return manual_gw
     
     try:
         if os.name == 'nt': # Windows
+            # Método mais preciso via netsh/wmic ou parsing de route
             import subprocess
+            # Tenta via powershell que é mais confiável em sistemas modernos
+            cmd = "powershell -NoProfile -Command \"Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object -ExpandProperty NextHop | Select-Object -First 1\""
+            out = subprocess.check_output(cmd, shell=True).decode().strip()
+            if out and len(out.split('.')) == 4:
+                return out
+            
+            # Fallback para route print se o powershell falhar
             cmd = "route print 0.0.0.0 | findstr 0.0.0.0"
             out = subprocess.check_output(cmd, shell=True).decode()
-            parts = out.split()
-            if len(parts) >= 3:
-                return parts[2]
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 3 and parts[0] == '0.0.0.0':
+                    return parts[2]
         else: # Linux/Mac
-            with open("/proc/net/route") as fh:
-                for line in fh:
-                    fields = line.strip().split()
-                    if fields[1] == '00000000':
-                        return socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
-    except:
-        pass
+            import subprocess
+            cmd = "ip route | grep default | awk '{print $3}'"
+            out = subprocess.check_output(cmd, shell=True).decode().strip()
+            if out:
+                return out
+            
+            # Fallback para parsing de /proc/net/route
+            if os.path.exists("/proc/net/route"):
+                with open("/proc/net/route") as fh:
+                    for line in fh:
+                        fields = line.strip().split()
+                        if fields[1] == '00000000':
+                            return socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+    except Exception as e:
+        logging.error(f"Erro ao detectar Gateway IP: {e}")
+    
     return "127.0.0.1"
 
 

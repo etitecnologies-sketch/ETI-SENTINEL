@@ -1,60 +1,59 @@
-import time
 import logging
-from core.stream_manager import StreamManager
-
+import time
+import os
+import subprocess
+import psutil
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
 
 class WatchdogWorker:
-    def __init__(self, stream_manager):
+    def __init__(self, stream_manager) -> None:
         self.manager = stream_manager
         self.running = True
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
 
-    def run(self):
-        logger.info("[WATCHDOG] Started")
+    def _cleanup_zombies(self):
+        """Mata processos FFmpeg órfãos ou travados que não estão no manager"""
+        try:
+            active_pids = set()
+            for stream in self.manager.streams.values():
+                if stream.get("process") and stream["process"].poll() is None:
+                    active_pids.add(stream["process"].pid)
 
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    if "ffmpeg" in proc.info['name'].lower():
+                        if proc.info['pid'] not in active_pids:
+                            # Se o processo tem mais de 5 minutos e não é monitorado, mata
+                            create_time = proc.create_time()
+                            if (time.time() - create_time) > 300:
+                                logger.warning(f"[Watchdog] Limpando FFmpeg zumbi: PID {proc.info['pid']}")
+                                proc.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            logger.error(f"[Watchdog] Erro na limpeza de zumbis: {e}")
+
+    def run(self) -> None:
+        logger.info("[Watchdog] Started")
+        last_cleanup = 0
         while self.running:
             try:
-                streams = self.manager.get_all()
+                # Limpeza de zumbis a cada 10 minutos
+                if (time.time() - last_cleanup) > 600:
+                    self._cleanup_zombies()
+                    last_cleanup = time.time()
 
-                for key, data in streams.items():
-                    proc = data.get("process")
-                    config = data.get("config", {})
-                    status = data.get("last_status", "unknown")
-
-                    if proc is None:
-                        continue
-
-                    poll_result = proc.poll()
-
-                    if poll_result is not None:
-                        logger.warning(f"[WATCHDOG] Stream died: {key} (exit code: {poll_result})")
-                        self.manager.mark_failed(key)
-                        self.manager.remove(key)
-
-                        token = config.get("token")
-                        device_id = config.get("device_id")
-                        channel = config.get("channel")
-
-                        if token and device_id and channel:
-                            from core.api_client import APIClient
-                            api = APIClient()
-                            api.send_push({
-                                "token": token,
-                                "device_id": device_id,
-                                "event_type": "videoloss_started",
-                                "channel": channel,
-                                "severity": "warn",
-                                "description": f"Stream morreu - watchdog detectou (key: {key})"
-                            })
-
+                for stream_key, stream in list(self.manager.streams.items()):
+                    if stream.get("process") and stream["process"].poll() is not None:
+                        logger.warning(f"[Watchdog] Stream {stream_key} died. Restarting...")
+                        self.manager.restart_stream(stream_key)
             except Exception as e:
-                logger.error(f"[WATCHDOG] Error: {e}")
+                logger.error(f"[Watchdog] Error: {e}")
 
-            time.sleep(5)
-
-        logger.info("[WATCHDOG] Stopped")
+            time.sleep(10)
+        logger.info("[Watchdog] Stopped")

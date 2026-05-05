@@ -70,6 +70,19 @@ class AIWorker:
 
                 model_name = _sanitize(os.getenv("AI_MODEL") or "yolov8s.pt")
                 self._model = YOLO(model_name)
+                
+                # Tenta habilitar aceleração de hardware automaticamente
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        self._model.to('cuda')
+                        logger.info("[AI] Aceleração NVIDIA CUDA habilitada.")
+                    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                        self._model.to('mps')
+                        logger.info("[AI] Aceleração Apple M-Series (MPS) habilitada.")
+                except Exception:
+                    logger.info("[AI] Rodando em modo CPU (Padrão).")
+                    
             except Exception as e:
                 logger.warning(f"[AI] ultralytics/YOLO not available: {e}")
                 return False

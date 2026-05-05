@@ -1065,38 +1065,122 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/" or path == "":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                
+                # Coleta dados para o Dashboard Técnico
+                relay_status = self.server.relay.status()
+                client_id = sanitize(self.server.env.get("CLIENT_ID") or "Não configurado")
+                ingest_url = sanitize(self.server.env.get("INGEST_API_URL") or "Não configurado")
+                gateway_ip = os.environ.get("INTERNAL_GATEWAY_IP", "Não detectado")
+                
+                # Formata timestamps para leitura humana
+                def format_ts(ts):
+                    if not ts: return "Nunca"
+                    return time.strftime("%H:%M:%S", time.localtime(ts))
+
+                last_push = format_ts(relay_status.get("last_push_ok"))
+                last_event = format_ts(relay_status.get("last_event_ts"))
+                
                 html = f"""
                 <!DOCTYPE html>
                 <html lang="pt-br">
                 <head>
                     <meta charset="UTF-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>ETI SENTINEL - Agente Local</title>
+                    <title>ETI SENTINEL - Dashboard do Técnico</title>
                     <style>
-                        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #070d18; color: #e2eaf5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
-                        .card {{ background: #0b1525; border: 1px solid rgba(59, 158, 255, 0.2); border-radius: 16px; padding: 40px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.5); max-width: 400px; width: 90%; }}
-                        h1 {{ color: #3b9eff; margin-bottom: 8px; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }}
-                        p {{ color: #64748b; font-size: 14px; margin-bottom: 30px; }}
-                        .status {{ display: inline-flex; align-items: center; gap: 8px; background: rgba(0, 201, 167, 0.1); color: #00c9a7; padding: 8px 16px; border-radius: 99px; font-weight: bold; font-size: 12px; margin-bottom: 20px; }}
-                        .dot {{ width: 8px; height: 8px; background: #00c9a7; border-radius: 50%; box-shadow: 0 0 10px #00c9a7; animation: pulse 2s infinite; }}
+                        body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #070d18; color: #e2eaf5; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }}
+                        .container {{ max-width: 800px; width: 100%; }}
+                        .header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; background: #0b1525; padding: 20px; border-radius: 16px; border: 1px solid rgba(59, 158, 255, 0.1); }}
+                        .logo-area {{ display: flex; align-items: center; gap: 15px; }}
+                        .logo-dot {{ width: 12px; height: 12px; background: #00c9a7; border-radius: 50%; box-shadow: 0 0 15px #00c9a7; animation: pulse 2s infinite; }}
                         @keyframes pulse {{ 0% {{ opacity: 0.4; }} 50% {{ opacity: 1; }} 100% {{ opacity: 0.4; }} }}
-                        .btn {{ display: block; background: #3b9eff; color: white; text-decoration: none; padding: 12px; border-radius: 8px; font-weight: bold; transition: all 0.2s; margin-top: 10px; }}
-                        .btn:hover {{ background: #1a7fff; transform: translateY(-2px); }}
-                        .info {{ margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05); font-size: 11px; color: #3a5c7a; text-align: left; }}
+                        h1 {{ margin: 0; font-size: 20px; letter-spacing: 1px; color: #3b9eff; }}
+                        
+                        .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 24px; }}
+                        .stat-card {{ background: #0b1525; padding: 20px; border-radius: 16px; border: 1px solid rgba(59, 158, 255, 0.05); }}
+                        .stat-label {{ color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }}
+                        .stat-value {{ font-size: 20px; font-weight: bold; color: #f8fafc; }}
+                        .stat-value.ok {{ color: #00c9a7; }}
+                        .stat-value.warn {{ color: #fbbf24; }}
+                        
+                        .info-table {{ background: #0b1525; border-radius: 16px; padding: 20px; border: 1px solid rgba(59, 158, 255, 0.05); margin-bottom: 24px; }}
+                        .info-row {{ display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }}
+                        .info-row:last-child {{ border-bottom: none; }}
+                        .info-label {{ color: #64748b; }}
+                        .info-val {{ font-weight: 500; color: #cbd5e1; }}
+                        
+                        .actions {{ display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }}
+                        .btn {{ background: #1e293b; color: #f8fafc; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.1); }}
+                        .btn:hover {{ background: #3b9eff; border-color: #3b9eff; transform: translateY(-2px); }}
+                        .btn-primary {{ background: #3b9eff; border-color: #3b9eff; }}
+                        
+                        .footer {{ margin-top: auto; padding: 40px 0 20px; color: #3a5c7a; font-size: 12px; text-align: center; }}
                     </style>
+                    <script>
+                        setTimeout(() => window.location.reload(), 15000);
+                    </script>
                 </head>
                 <body>
-                    <div class="card">
-                        <div class="status"><div class="dot"></div> AGENTE ATIVO</div>
-                        <h1>ETI SENTINEL</h1>
-                        <p>O serviço de borda está rodando corretamente neste computador.</p>
-                        
-                        <a href="/api/status" class="btn">Ver Status da API</a>
-                        
-                        <div class="info">
-                            <div><strong>ID do Cliente:</strong> {sanitize(self.server.env.get("CLIENT_ID") or "Não configurado")}</div>
-                            <div><strong>Servidor Cloud:</strong> {sanitize(self.server.env.get("INGEST_API_URL") or "Não configurado")}</div>
-                            <div style="margin-top:10px; opacity: 0.5;">Versão: 1.0.3-edge</div>
+                    <div class="container">
+                        <div class="header">
+                            <div class="logo-area">
+                                <div class="logo-dot"></div>
+                                <h1>ETI SENTINEL EDGE</h1>
+                            </div>
+                            <div style="font-size: 12px; color: #64748b;">v1.0.5-tecnico</div>
+                        </div>
+
+                        <div class="grid">
+                            <div class="stat-card">
+                                <div class="stat-label">Conexão Cloud</div>
+                                <div class="stat-value {'ok' if relay_status.get('last_push_ok') else 'warn'}">
+                                    {'Online' if (time.time() - relay_status.get('last_push_ok', 0)) < 60 else 'Sincronizando...'}
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Eventos Totais</div>
+                                <div class="stat-value">{relay_status.get('events_total', 0)}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Fila de Envio</div>
+                                <div class="stat-value {'' if relay_status.get('queue_size', 0) == 0 else 'warn'}">
+                                    {relay_status.get('queue_size', 0)} pacotes
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="info-table">
+                            <div class="info-row">
+                                <div class="info-label">Identificador do Cliente</div>
+                                <div class="info-val">{client_id}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">IP Gateway (Máquina)</div>
+                                <div class="info-val" style="color: #3b9eff; font-weight: 800;">{gateway_ip}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Último Envio Cloud</div>
+                                <div class="info-val">{last_push}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Último Evento Local</div>
+                                <div class="info-val">{last_event}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Servidor Ingestão</div>
+                                <div class="info-val">{ingest_url}</div>
+                            </div>
+                        </div>
+
+                        <div class="actions">
+                            <a href="/api/status" class="btn">JSON Status</a>
+                            <a href="/api/events?limit=20" class="btn">Logs Recentes</a>
+                            <a href="/api/rules" class="btn">Regras Ativas</a>
+                            <a href="https://eti-sentinel.com" target="_blank" class="btn btn-primary">Painel Cloud</a>
+                        </div>
+
+                        <div class="footer">
+                            &copy; 2026 ETI Tecnologies - Monitoramento Inteligente 24/7
                         </div>
                     </div>
                 </body>
