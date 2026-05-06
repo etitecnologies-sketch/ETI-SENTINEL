@@ -19,11 +19,20 @@ def get_session():
     return session
 
 
+import time
+
+# Compartilhado entre workers e API local para diagnostico
+_LAST_HEARTBEAT_TS = 0.0
+
 class APIClient:
     def __init__(self):
         self.session = get_session()
         self.headers = {"x-collector-key": TOKEN}
         self.params = {"client_id": CLIENT_ID}
+
+    @staticmethod
+    def get_last_heartbeat():
+        return _LAST_HEARTBEAT_TS
 
     @retry(max_retries=3)
     def get_rtsp_config(self):
@@ -62,6 +71,7 @@ class APIClient:
             return False
 
     def heartbeat(self, metrics):
+        global _LAST_HEARTBEAT_TS
         try:
             payload = {
                 "client_id": CLIENT_ID,
@@ -69,11 +79,13 @@ class APIClient:
                 "streams_active": [],
                 "gateway_ip": os.getenv("INTERNAL_GATEWAY_IP") or "127.0.0.1"
             }
-            self.session.post(
+            r = self.session.post(
                 f"{API_URL}/collector/heartbeat",
                 json=payload,
                 headers=self.headers,
                 timeout=5
             )
+            if r.status_code == 200:
+                _LAST_HEARTBEAT_TS = time.time()
         except Exception:
             pass

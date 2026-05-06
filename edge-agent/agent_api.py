@@ -1068,16 +1068,31 @@ class Handler(BaseHTTPRequestHandler):
                 
                 # Coleta dados para o Dashboard Técnico
                 relay_status = self.server.relay.status()
+                
+                # Busca o nome amigável do cliente (obtido via refresh_client_notify)
+                client_name = "Não identificado"
+                with self.server.relay._lock:
+                    client_name = self.server.relay._client_notify.get("client_name") or "Carregando..."
+                
                 client_id = sanitize(self.server.env.get("CLIENT_ID") or "Não configurado")
                 ingest_url = sanitize(self.server.env.get("INGEST_API_URL") or "Não configurado")
                 gateway_ip = os.environ.get("INTERNAL_GATEWAY_IP", "Não detectado")
                 
-                # Formata timestamps para leitura humana
+                # NOVO: Verifica se o Heartbeat está realmente chegando na Railway
+                # Se o status.last_push_ok for recente, marcamos como Online
+                from core.api_client import APIClient
+                last_push_ts = relay_status.get("last_push_ok", 0)
+                last_heartbeat_ts = APIClient.get_last_heartbeat()
+                
+                # Consideramos ONLINE se o Push de eventos OU o Heartbeat de saude funcionou nos ultimos 60s
+                effective_last_push = max(last_push_ts, last_heartbeat_ts)
+                is_cloud_online = (time.time() - effective_last_push) < 60 if effective_last_push > 0 else False
+                
                 def format_ts(ts):
                     if not ts: return "Nunca"
                     return time.strftime("%H:%M:%S", time.localtime(ts))
 
-                last_push = format_ts(relay_status.get("last_push_ok"))
+                last_push = format_ts(effective_last_push)
                 last_event = format_ts(relay_status.get("last_event_ts"))
                 
                 html = f"""
@@ -1115,12 +1130,56 @@ class Handler(BaseHTTPRequestHandler):
                         .btn-primary {{ background: #3b9eff; border-color: #3b9eff; }}
                         
                         .footer {{ margin-top: auto; padding: 40px 0 20px; color: #3a5c7a; font-size: 12px; text-align: center; }}
+
+                        /* Estilos para o Modal de Resultados */
+                        .modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(5px); }}
+                        .modal-content {{ background: #0b1525; width: 90%; max-width: 700px; max-height: 80vh; border-radius: 16px; border: 1px solid rgba(59, 158, 255, 0.2); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }}
+                        .modal-header {{ padding: 15px 20px; background: rgba(59, 158, 255, 0.05); border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; }}
+                        .modal-title {{ font-weight: bold; color: #3b9eff; font-size: 14px; text-transform: uppercase; }}
+                        .modal-close {{ cursor: pointer; color: #64748b; font-size: 24px; line-height: 1; }}
+                        .modal-body {{ padding: 20px; overflow-y: auto; flex-grow: 1; }}
+                        .json-pre {{ margin: 0; font-family: 'Consolas', monospace; font-size: 12px; color: #00c9a7; white-space: pre-wrap; word-break: break-all; }}
                     </style>
                     <script>
-                        setTimeout(() => window.location.reload(), 15000);
+                        setTimeout(() => {{ if(!document.getElementById('modal').style.display || document.getElementById('modal').style.display === 'none') window.location.reload(); }}, 15000);
+
+                        async function fetchData(url, title) {{
+                            const modal = document.getElementById('modal');
+                            const modalTitle = document.getElementById('modal-title');
+                            const modalBody = document.getElementById('modal-body');
+                            
+                            modalTitle.innerText = "Carregando...";
+                            modalBody.innerHTML = '<div style="text-align:center; padding: 20px; color: #64748b;">Buscando dados do agente...</div>';
+                            modal.style.display = 'flex';
+
+                            try {{
+                                const response = await fetch(url);
+                                const data = await response.json();
+                                modalTitle.innerText = title;
+                                modalBody.innerHTML = '<pre class="json-pre">' + JSON.stringify(data, null, 2) + '</pre>';
+                            }} catch (error) {{
+                                modalTitle.innerText = "Erro";
+                                modalBody.innerHTML = '<div style="color: #ef4444;">Falha ao carregar dados: ' + error + '</div>';
+                            }}
+                        }}
+
+                        function closeModal() {{
+                            document.getElementById('modal').style.display = 'none';
+                        }}
                     </script>
                 </head>
                 <body>
+                    <!-- Modal -->
+                    <div id="modal" class="modal-overlay" onclick="if(event.target === this) closeModal()">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <div id="modal-title" class="modal-title">Título</div>
+                                <div class="modal-close" onclick="closeModal()">&times;</div>
+                            </div>
+                            <div id="modal-body" class="modal-body"></div>
+                        </div>
+                    </div>
+
                     <div class="container">
                         <div class="header">
                             <div class="logo-area">
@@ -1133,8 +1192,8 @@ class Handler(BaseHTTPRequestHandler):
                         <div class="grid">
                             <div class="stat-card">
                                 <div class="stat-label">Conexão Cloud</div>
-                                <div class="stat-value {'ok' if relay_status.get('last_push_ok') else 'warn'}">
-                                    {'Online' if (time.time() - relay_status.get('last_push_ok', 0)) < 60 else 'Sincronizando...'}
+                                <div class="stat-value {'ok' if is_cloud_online else 'warn'}">
+                                    {'Online' if is_cloud_online else 'Sincronizando...'}
                                 </div>
                             </div>
                             <div class="stat-card">
@@ -1151,7 +1210,11 @@ class Handler(BaseHTTPRequestHandler):
 
                         <div class="info-table">
                             <div class="info-row">
-                                <div class="info-label">Identificador do Cliente</div>
+                                <div class="info-label">Cliente (Nome Fantasia)</div>
+                                <div class="info-val" style="color: #00c9a7; font-weight: 800; text-transform: uppercase;">{client_name}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">ID do Cliente</div>
                                 <div class="info-val">{client_id}</div>
                             </div>
                             <div class="info-row">
@@ -1173,9 +1236,9 @@ class Handler(BaseHTTPRequestHandler):
                         </div>
 
                         <div class="actions">
-                            <a href="/api/status" class="btn">JSON Status</a>
-                            <a href="/api/events?limit=20" class="btn">Logs Recentes</a>
-                            <a href="/api/rules" class="btn">Regras Ativas</a>
+                            <button onclick="fetchData('/api/status', 'Status Completo (JSON)')" class="btn">JSON Status</button>
+                            <button onclick="fetchData('/api/events?limit=20', 'Últimos 20 Eventos')" class="btn">Logs Recentes</button>
+                            <button onclick="fetchData('/api/rules', 'Regras de Automação Ativas')" class="btn">Regras Ativas</button>
                             <a href="https://eti-sentinel.com" target="_blank" class="btn btn-primary">Painel Cloud</a>
                         </div>
 

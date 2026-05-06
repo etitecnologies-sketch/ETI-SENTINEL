@@ -649,6 +649,18 @@ function Stop-EdgeRuntime([string]$rootDir) {
 function Download-Repo([string]$destDir) {
     Stop-EdgeRuntime $destDir
 
+    # SOLUÇÃO DEFINITIVA: Se já temos os arquivos, não tentamos baixar nada
+    $currentDir = Get-Item .
+    if (Test-Path (Join-Path $currentDir.FullName "edge-agent\edge_agent.py")) {
+        Write-Inf "Modo Offline: Usando arquivos locais para evitar erro de ZIP."
+        if (Test-Path $destDir) {
+            try { Stop-EdgeRuntime $destDir; Remove-Item $destDir -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+        }
+        New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        Copy-Item (Join-Path $currentDir.FullName "*") $destDir -Recurse -Force -Exclude ".git",".venv",".state"
+        return
+    }
+
     $backupEnv = ""
     try {
         $oldEnv = Join-Path $destDir "edge-agent\.env"
