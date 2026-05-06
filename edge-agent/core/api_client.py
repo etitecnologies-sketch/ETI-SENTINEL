@@ -72,20 +72,34 @@ class APIClient:
 
     def heartbeat(self, metrics):
         global _LAST_HEARTBEAT_TS
-        try:
-            payload = {
-                "client_id": CLIENT_ID,
-                "metrics": metrics,
-                "streams_active": [],
-                "gateway_ip": os.getenv("INTERNAL_GATEWAY_IP") or "127.0.0.1"
-            }
-            r = self.session.post(
-                f"{API_URL}/collector/heartbeat",
-                json=payload,
-                headers=self.headers,
-                timeout=5
-            )
-            if r.status_code == 200:
-                _LAST_HEARTBEAT_TS = time.time()
-        except Exception:
-            pass
+        # Heartbeat com retry local simples e timeout maior
+        for attempt in range(2):
+            try:
+                payload = {
+                    "client_id": CLIENT_ID,
+                    "metrics": metrics,
+                    "streams_active": [],
+                    "gateway_ip": os.getenv("INTERNAL_GATEWAY_IP") or "127.0.0.1"
+                }
+                r = self.session.post(
+                    f"{API_URL}/collector/heartbeat",
+                    json=payload,
+                    headers=self.headers,
+                    timeout=15  # Aumentado de 5 para 15
+                )
+                if r.status_code == 200:
+                    _LAST_HEARTBEAT_TS = time.time()
+                    import logging
+                    logging.info(f"[CLOUD] Sinal de vida (Heartbeat) aceito pela Railway.")
+                    return True
+                else:
+                    import logging
+                    logging.error(f"[CLOUD] Falha no sinal de vida: {r.status_code} - {r.text}")
+            except Exception as e:
+                import logging
+                if attempt == 0:
+                    logging.warning(f"[CLOUD] Retentativa de heartbeat após erro: {e}")
+                    time.sleep(1)
+                    continue
+                logging.error(f"[CLOUD] Erro de conexão com a Railway (heartbeat): {e}")
+        return False

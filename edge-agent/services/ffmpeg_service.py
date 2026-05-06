@@ -88,7 +88,11 @@ def start_ffmpeg(rtsp_url, stream_key, ffmpeg_path=None, transcode: bool = False
         ffmpeg_path,
         "-hide_banner",
         "-loglevel", "error",
+        "-hwaccel", "auto",
         "-rtsp_transport", "tcp",
+        "-analyzeduration", "10M",
+        "-probesize", "10M",
+        "-fflags", "+genpts+discardcorrupt+igndts",
         "-i", rtsp_url,
     ]
 
