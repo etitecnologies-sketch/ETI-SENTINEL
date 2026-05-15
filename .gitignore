@@ -64,3 +64,24 @@ venv/
 # Edge Agent runtime state
 edge-agent/.state/
 
+# Binários de distribuição (gerados pelo build_exe.py)
+ETI_SENTINEL_CLIENT_READY/*.exe
+ETI_SENTINEL_CLIENT_READY/bin/*.exe
+ETI_SENTINEL_CLIENT_READY/bin/*.yml
+ETI_SENTINEL_CLIENT_READY/bin/LICENSE
+
+# Modelos de IA (grandes demais para o repositório)
+*.onnx
+bin/*.onnx
+bin/onnx_classes.json
+
+# Binários na raiz do projeto
+bin/*.exe
+bin/*.yml
+
+# Spec do PyInstaller (gerado automaticamente com caminhos absolutos da máquina)
+*.spec
+
+# Memória interna do Claude Code (não é código do projeto)
+.claude/
+

@@ -8,6 +8,26 @@ from typing import Any, Dict, Optional, Set, Tuple
 
 import requests
 
+try:
+    from workers.ai_analytics import (
+        ZoneIntrusionDetector,
+        LineCrossingDetector,
+        PeopleCounter,
+        extract_detections,
+    )
+    _ANALYTICS_AVAILABLE = True
+except ImportError:
+    try:
+        from ai_analytics import (
+            ZoneIntrusionDetector,
+            LineCrossingDetector,
+            PeopleCounter,
+            extract_detections,
+        )
+        _ANALYTICS_AVAILABLE = True
+    except ImportError:
+        _ANALYTICS_AVAILABLE = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +71,15 @@ class AIWorker:
 
         self._model = None
         self._cv2 = None
+
+        if _ANALYTICS_AVAILABLE:
+            self._zone_detector = ZoneIntrusionDetector()
+            self._line_detector = LineCrossingDetector()
+            self._people_counter = PeopleCounter()
+        else:
+            self._zone_detector = None
+            self._line_detector = None
+            self._people_counter = None
 
     def stop(self) -> None:
         self.running = False
@@ -471,6 +500,122 @@ class AIWorker:
         except Exception:
             return 0.0
 
+    def _run_analytics(
+        self,
+        stream_key: str,
+        token: str,
+        device_id: int,
+        channel: int,
+        cfg: Dict[str, Any],
+        boxes: Any,
+        names: Dict[int, str],
+        frame: Any,
+        fw: int,
+        fh: int,
+        conf_th: float,
+    ) -> None:
+        """Roda analiticos avancados: zona de intrusao, linha virtual e contagem."""
+        if not _ANALYTICS_AVAILABLE:
+            return
+
+        try:
+            allowed = _parse_csv_set(os.getenv("AI_CLASSES") or "person,car,motorcycle")
+            detections = extract_detections(boxes, names, fw, fh, allowed or None, conf_th * 0.8)
+        except Exception:
+            return
+
+        tags = list(cfg.get("tags") or [])
+        now = time.time()
+
+        # ---- Zona de Intrusao ----------------------------------------
+        if self._zone_detector and bool(os.getenv("AI_ZONES")):
+            for det in detections:
+                cls_name = det["cls_name"]
+                try:
+                    if self._zone_detector.check(stream_key, cls_name, det["cx_norm"], det["cy_norm"]):
+                        cooldown_ok = self._cooldown_ok(device_id, channel, "ai_zone_intrusion:" + cls_name, now)
+                        if cooldown_ok:
+                            snap = self._encode_snapshot_b64(frame, stream_key=stream_key)
+                            self._push_event(
+                                token, device_id, channel,
+                                "ai_zone_intrusion",
+                                "warn",
+                                f"{cls_name} entrou na zona monitorada (conf={det['conf']:.2f})",
+                                snapshot_jpg_b64=snap,
+                                extra={
+                                    "ai_class": cls_name,
+                                    "ai_conf": det["conf"],
+                                    "ai_cx": det["cx_norm"],
+                                    "ai_cy": det["cy_norm"],
+                                    "tags": tags + ["ai_zone"],
+                                    "device_type": cfg.get("device_type") or "",
+                                },
+                            )
+                except Exception:
+                    continue
+
+        # ---- Cruzamento de Linha Virtual ------------------------------
+        if self._line_detector and bool(os.getenv("AI_CROSSING_LINES")):
+            for det in detections:
+                cls_name = det["cls_name"]
+                try:
+                    if self._line_detector.check_all_lines(stream_key, cls_name, det["cx_norm"], det["cy_norm"]):
+                        cooldown_ok = self._cooldown_ok(device_id, channel, "ai_line_crossing:" + cls_name, now)
+                        if cooldown_ok:
+                            snap = self._encode_snapshot_b64(frame, stream_key=stream_key)
+                            self._push_event(
+                                token, device_id, channel,
+                                "ai_line_crossing",
+                                "warn",
+                                f"{cls_name} cruzou linha virtual (conf={det['conf']:.2f})",
+                                snapshot_jpg_b64=snap,
+                                extra={
+                                    "ai_class": cls_name,
+                                    "ai_conf": det["conf"],
+                                    "ai_cx": det["cx_norm"],
+                                    "ai_cy": det["cy_norm"],
+                                    "tags": tags + ["ai_line"],
+                                    "device_type": cfg.get("device_type") or "",
+                                },
+                            )
+                except Exception:
+                    continue
+
+        # ---- Contagem de Pessoas --------------------------------------
+        if self._people_counter:
+            person_count = sum(1 for d in detections if d["cls_name"] == "person")
+            try:
+                crowd_alert, send_metric = self._people_counter.process(stream_key, person_count)
+                if crowd_alert:
+                    max_count = int(os.getenv("AI_PEOPLE_MAX_COUNT") or 0)
+                    self._push_event(
+                        token, device_id, channel,
+                        "ai_crowd_alert",
+                        "warn",
+                        f"Lotacao detectada: {person_count} pessoas (limite: {max_count})",
+                        snapshot_jpg_b64=self._encode_snapshot_b64(frame, stream_key=stream_key),
+                        extra={
+                            "ai_people_count": person_count,
+                            "ai_people_limit": max_count,
+                            "tags": tags + ["ai_count"],
+                            "device_type": cfg.get("device_type") or "",
+                        },
+                    )
+                if send_metric and person_count > 0:
+                    self._push_event(
+                        token, device_id, channel,
+                        "ai_people_count",
+                        "info",
+                        f"Contagem periodica: {person_count} pessoa(s) em cena",
+                        extra={
+                            "ai_people_count": person_count,
+                            "tags": tags,
+                            "device_type": cfg.get("device_type") or "",
+                        },
+                    )
+            except Exception:
+                pass
+
     def run(self) -> None:
         if not _bool(os.getenv("ENABLE_AI_ANALYTICS") or "0"):
             return
@@ -686,6 +831,24 @@ class AIWorker:
                                 }
                                 ok_push = self._push_event(token, did, ch, ev_type, sev, desc, snapshot_jpg_b64=snap, extra=extra)
                                 any_fired = any_fired or ok_push
+
+                        # ---- Analiticos avancados (zona, linha, contagem) ----
+                        try:
+                            self._run_analytics(
+                                stream_key=stream_key,
+                                token=token,
+                                device_id=did,
+                                channel=ch,
+                                cfg=cfg,
+                                boxes=boxes,
+                                names=names,
+                                frame=frame,
+                                fw=fw if frame_area > 0 else 640,
+                                fh=fh if frame_area > 0 else 480,
+                                conf_th=conf_th,
+                            )
+                        except Exception:
+                            pass
 
                         if debug:
                             last_dbg = float(self._last_debug_ts.get(stream_key) or 0.0)

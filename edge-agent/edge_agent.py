@@ -173,15 +173,21 @@ def run_check(here: Path, env: dict) -> int:
 
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
-        # Tenta no diretório bin da instalação
-        p = here.parent / "bin" / "ffmpeg.exe"
-        if p.exists(): ffmpeg_path = str(p)
+        for _candidate in [
+            here / "bin" / "ffmpeg.exe",
+            here.parent / "bin" / "ffmpeg.exe",
+            Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "ffmpeg.exe",
+        ]:
+            if _candidate.exists():
+                ffmpeg_path = str(_candidate)
+                break
     
     print(f"ffmpeg: {'OK (' + ffmpeg_path + ')' if ffmpeg_path else 'NÃO ENCONTRADO'}")
 
     # Check MediaMTX
     mtx_bin = None
     possible_mtx = [
+        here / "bin" / "mediamtx.exe",
         here.parent / "bin" / "mediamtx.exe",
         Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe",
         Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "mediamtx.exe",
@@ -426,7 +432,25 @@ def main() -> None:
             from workers.stream_worker import StreamWorker
             from workers.watchdog_worker import WatchdogWorker
             from workers.heartbeat_worker import HeartbeatWorker
-            from workers.ai_worker import AIWorker
+
+            # Seleciona o worker de IA: ONNX (leve) tem prioridade sobre PyTorch
+            _AIWorkerClass = None
+            try:
+                from workers.ai_worker_onnx import ONNXAIWorker as _ONNXWorker
+                from workers.ai_worker_onnx import _find_model
+                if _find_model():
+                    _AIWorkerClass = _ONNXWorker
+                    print("[INFO] Motor de IA: ONNX Runtime (leve, sem PyTorch).")
+            except Exception:
+                pass
+            if _AIWorkerClass is None:
+                try:
+                    from workers.ai_worker import AIWorker as _PyWorker
+                    _AIWorkerClass = _PyWorker
+                    print("[INFO] Motor de IA: ultralytics/PyTorch.")
+                except Exception:
+                    _AIWorkerClass = None
+            AIWorker = _AIWorkerClass
 
             try:
                 (here / ".state").mkdir(parents=True, exist_ok=True)
@@ -477,10 +501,18 @@ def main() -> None:
             except Exception:
                 pass
 
+            # ---- SEQUENCIA DE BOOT ----
+            # Etapa 1: MediaMTX (servidor de streaming) — precisa estar pronto antes dos streams
             if manage_mediamtx and mtx_exe:
                 proc = start_mediamtx(mtx_exe)
                 if proc:
-                    print(f"[INFO] MediaMTX (WebRTC/HLS) iniciado a partir de: {mtx_exe}")
+                    print(f"[INFO] MediaMTX iniciado. Aguardando ficar pronto...")
+                    from services.ffmpeg_service import wait_for_mediamtx
+                    if wait_for_mediamtx(timeout=20):
+                        print(f"[INFO] MediaMTX pronto na porta 8554.")
+                    else:
+                        print(f"[WARN] MediaMTX nao respondeu em 20s — streams podem falhar.")
+
             api = APIClient()
             manager = StreamManager(max_retries=int(_sanitize(env.get("STREAM_MAX_RETRIES") or "0") or 0))
             cache = StateCache(cache_file=_sanitize(env.get("CACHE_FILE") or str(here / ".state" / "rtsp_cache.json")))
@@ -488,12 +520,23 @@ def main() -> None:
             stream_worker = StreamWorker(api, manager, cache)
             watchdog_worker = WatchdogWorker(manager)
             heartbeat_worker = HeartbeatWorker(api, interval=int(_sanitize(env.get("HEARTBEAT_INTERVAL") or "15") or 15))
-            ai_worker = AIWorker(manager)
+            ai_worker = AIWorker(manager) if AIWorker else None
 
-            threading.Thread(target=stream_worker.run, daemon=True).start()
-            threading.Thread(target=watchdog_worker.run, daemon=True).start()
-            threading.Thread(target=heartbeat_worker.run, daemon=True).start()
-            threading.Thread(target=ai_worker.run, daemon=True).start()
+            # Etapa 2: Stream workers (precisam do MediaMTX pronto)
+            threading.Thread(target=stream_worker.run, daemon=True, name="stream-worker").start()
+            threading.Thread(target=watchdog_worker.run, daemon=True, name="watchdog").start()
+            threading.Thread(target=heartbeat_worker.run, daemon=True, name="heartbeat").start()
+
+            # Etapa 3: AI Worker — inicia com delay para dar tempo dos streams conectarem
+            if ai_worker:
+                ai_delay = int(_sanitize(env.get("AI_STARTUP_DELAY_SECONDS") or "20") or 20)
+                def _start_ai_delayed():
+                    time.sleep(ai_delay)
+                    print(f"[INFO] AI Worker iniciando apos {ai_delay}s de espera.")
+                    ai_worker.run()
+                threading.Thread(target=_start_ai_delayed, daemon=True, name="ai-worker").start()
+            else:
+                print("[INFO] AI Worker desabilitado (sem modelo disponivel).")
         except Exception as e:
             print(f"[ERROR] Falha ao iniciar streaming PRO: {e}")
     if enable_onvif:
@@ -511,7 +554,10 @@ def main() -> None:
 
     procs = {}
     for args in specs:
-        procs[_proc_name(args)] = _spawn(args, env)
+        try:
+            procs[_proc_name(args)] = _spawn(args, env)
+        except Exception as e:
+            print(f"[WARN] Nao foi possivel iniciar {_proc_name(args)}: {e}")
 
     try:
         while True:

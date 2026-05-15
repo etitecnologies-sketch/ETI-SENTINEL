@@ -50,8 +50,9 @@ class WatchdogWorker:
 
                 for stream_key, stream in list(self.manager.streams.items()):
                     if stream.get("process") and stream["process"].poll() is not None:
-                        logger.warning(f"[Watchdog] Stream {stream_key} died. Restarting...")
-                        self.manager.restart_stream(stream_key)
+                        logger.warning(f"[Watchdog] Stream {stream_key} died. Marking for restart.")
+                        self.manager.mark_failed(stream_key)
+                        self.manager.remove(stream_key)
             except Exception as e:
                 logger.error(f"[Watchdog] Error: {e}")
 

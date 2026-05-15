@@ -1,7 +1,11 @@
-import requests
+import logging
 import os
+import time
+
+import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 from utils.backoff import retry
 from config import API_URL, TOKEN, CLIENT_ID
 
@@ -18,8 +22,6 @@ def get_session():
     session.mount("http://", HTTPAdapter(max_retries=retries))
     return session
 
-
-import time
 
 # Compartilhado entre workers e API local para diagnostico
 _LAST_HEARTBEAT_TS = 0.0
@@ -89,14 +91,11 @@ class APIClient:
                 )
                 if r.status_code == 200:
                     _LAST_HEARTBEAT_TS = time.time()
-                    import logging
-                    logging.info(f"[CLOUD] Sinal de vida (Heartbeat) aceito pela Railway.")
+                    logging.info("[CLOUD] Sinal de vida (Heartbeat) aceito pela Railway.")
                     return True
                 else:
-                    import logging
                     logging.error(f"[CLOUD] Falha no sinal de vida: {r.status_code} - {r.text}")
             except Exception as e:
-                import logging
                 if attempt == 0:
                     logging.warning(f"[CLOUD] Retentativa de heartbeat após erro: {e}")
                     time.sleep(1)

@@ -1,0 +1,643 @@
+"""
+ETI SENTINEL - AI Worker com ONNX Runtime
+==========================================
+Motor de inferencia leve: sem PyTorch, sem ultralytics.
+Requer apenas: onnxruntime (~15 MB) + opencv-python.
+
+Compativel com modelos YOLOv8 exportados via exportar_modelo.py.
+
+Variaveis de ambiente:
+  AI_ONNX_MODEL          Caminho do modelo .onnx (padrao: bin/modelo_ia.onnx)
+  AI_ONNX_CLASSES        Caminho do JSON de classes (padrao: bin/onnx_classes.json)
+  AI_CONF_THRESHOLD      Confianca minima 0.0-1.0 (padrao: 0.50)
+  AI_NMS_THRESHOLD       Limiar de NMS 0.0-1.0 (padrao: 0.45)
+  AI_IMAGE_SIZE          Tamanho de entrada do modelo (padrao: 640)
+  AI_CLASSES             Classes permitidas, separadas por virgula
+  AI_PEOPLE_MAX_COUNT    Alerta de lotacao (0 = desabilitado)
+  AI_ZONES               Zonas de intrusao JSON
+  AI_CROSSING_LINES      Linhas virtuais JSON
+  AI_FRAME_EVERY_SECONDS Intervalo entre frames analisados (padrao: 1.0)
+  AI_EVENT_COOLDOWN_SECONDS Cooldown entre eventos (padrao: 45)
+  AI_STARTUP_DELAY_SECONDS  Delay de inicio em segundos (padrao: 20)
+  ENABLE_AI_ANALYTICS    1 para ativar (padrao: 0)
+"""
+
+import base64
+import json
+import logging
+import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+# Classes COCO padrao (fallback se onnx_classes.json nao existir)
+_COCO_CLASSES = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+    "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana",
+    "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza",
+    "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table",
+    "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+    "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
+    "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _bool(v: Any) -> bool:
+    return str(v or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _sanitize(s: Any) -> str:
+    return str(s or "").strip()
+
+
+def _csv_set(s: str) -> Set[str]:
+    return {x.strip().lower() for x in (_sanitize(s) or "").split(",") if x.strip()}
+
+
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(os.getenv(key) or default)
+    except Exception:
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(os.getenv(key) or default)
+    except Exception:
+        return default
+
+
+# ---------------------------------------------------------------------------
+# Pre/Pos-processamento ONNX YOLOv8
+# ---------------------------------------------------------------------------
+
+def _find_model() -> Optional[str]:
+    """Procura o modelo ONNX em varios locais."""
+    env_path = _sanitize(os.getenv("AI_ONNX_MODEL"))
+    if env_path and Path(env_path).exists():
+        return env_path
+
+    candidates = [
+        Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "modelo_ia.onnx",
+        Path(__file__).resolve().parent.parent.parent / "bin" / "modelo_ia.onnx",
+        Path(__file__).resolve().parent.parent / "bin" / "modelo_ia.onnx",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return None
+
+
+def _load_classes() -> List[str]:
+    """Carrega nomes das classes do JSON ou usa COCO padrao."""
+    env_path = _sanitize(os.getenv("AI_ONNX_CLASSES"))
+    candidates = []
+    if env_path:
+        candidates.append(Path(env_path))
+    candidates += [
+        Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "onnx_classes.json",
+        Path(__file__).resolve().parent.parent.parent / "bin" / "onnx_classes.json",
+        Path(__file__).resolve().parent.parent / "bin" / "onnx_classes.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                with open(p, encoding="utf-8") as f:
+                    data = json.load(f)
+                    classes = data.get("classes") or data
+                    if isinstance(classes, list) and classes:
+                        logger.info(f"[AI-ONNX] Classes carregadas: {p} ({len(classes)} classes)")
+                        return [str(c).lower() for c in classes]
+            except Exception:
+                continue
+    return _COCO_CLASSES
+
+
+def _letterbox(img, new_shape=640, color=(114, 114, 114)):
+    """Redimensiona mantendo proporcao e preenche com cinza."""
+    import numpy as np
+    import cv2
+
+    h, w = img.shape[:2]
+    if isinstance(new_shape, int):
+        new_shape = (new_shape, new_shape)
+
+    scale = min(new_shape[0] / h, new_shape[1] / w)
+    new_w = int(round(w * scale))
+    new_h = int(round(h * scale))
+
+    dw = (new_shape[1] - new_w) / 2
+    dh = (new_shape[0] - new_h) / 2
+
+    img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+    top = int(round(dh - 0.1))
+    bottom = int(round(dh + 0.1))
+    left = int(round(dw - 0.1))
+    right = int(round(dw + 0.1))
+    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+
+    return img, scale, (dw, dh)
+
+
+def _preprocess(frame, img_size: int = 640):
+    """Prepara o frame para inferencia ONNX."""
+    import numpy as np
+    import cv2
+
+    img, scale, pad = _letterbox(frame, img_size)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = img.astype(np.float32) / 255.0
+    img = img.transpose(2, 0, 1)                    # HWC -> CHW
+    img = np.expand_dims(img, axis=0)               # CHW -> BCHW
+    return img, scale, pad
+
+
+def _postprocess(
+    output: Any,
+    scale: float,
+    pad: Tuple[float, float],
+    orig_h: int,
+    orig_w: int,
+    conf_threshold: float = 0.50,
+    nms_threshold: float = 0.45,
+    classes: Optional[List[str]] = None,
+    allowed_classes: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Decodifica saida YOLOv8 ONNX: [1, 84, 8400] -> lista de deteccoes."""
+    import numpy as np
+    import cv2
+
+    pred = output[0]                        # [1, 84, 8400] -> [84, 8400]
+    if pred.ndim == 3:
+        pred = pred[0]
+    pred = pred.T                           # [8400, 84]
+
+    num_classes = pred.shape[1] - 4
+    boxes_xywh = pred[:, :4]               # cx, cy, w, h (em pixels do input)
+    scores_all = pred[:, 4:]               # [8400, num_classes]
+
+    class_ids = np.argmax(scores_all, axis=1)
+    confidences = scores_all[np.arange(len(scores_all)), class_ids]
+
+    mask = confidences >= conf_threshold
+    if not mask.any():
+        return []
+
+    boxes_xywh = boxes_xywh[mask]
+    confidences = confidences[mask]
+    class_ids = class_ids[mask]
+
+    # Converte xywh -> xyxy no espaco do input (640x640)
+    x1 = boxes_xywh[:, 0] - boxes_xywh[:, 2] / 2
+    y1 = boxes_xywh[:, 1] - boxes_xywh[:, 3] / 2
+    x2 = boxes_xywh[:, 0] + boxes_xywh[:, 2] / 2
+    y2 = boxes_xywh[:, 1] + boxes_xywh[:, 3] / 2
+
+    # Desfaz o letterbox para coordenadas do frame original
+    x1 = np.clip((x1 - pad[0]) / scale, 0, orig_w)
+    y1 = np.clip((y1 - pad[1]) / scale, 0, orig_h)
+    x2 = np.clip((x2 - pad[0]) / scale, 0, orig_w)
+    y2 = np.clip((y2 - pad[1]) / scale, 0, orig_h)
+
+    # NMS via OpenCV (sem torchvision)
+    boxes_nms = np.stack([x1, y1, x2 - x1, y2 - y1], axis=1).tolist()
+    confs_nms = confidences.tolist()
+    indices = cv2.dnn.NMSBoxes(boxes_nms, confs_nms, conf_threshold, nms_threshold)
+
+    if indices is None or len(indices) == 0:
+        return []
+
+    indices = indices.flatten() if hasattr(indices, "flatten") else list(indices)
+
+    results = []
+    for i in indices:
+        cls_id = int(class_ids[i])
+        cls_name = (classes[cls_id] if classes and cls_id < len(classes) else str(cls_id)).lower()
+
+        if allowed_classes and cls_name not in allowed_classes:
+            continue
+
+        fx1, fy1, fx2, fy2 = float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i])
+        cx_norm = ((fx1 + fx2) / 2.0) / max(1, orig_w)
+        cy_norm = ((fy1 + fy2) / 2.0) / max(1, orig_h)
+
+        results.append({
+            "cls_name": cls_name,
+            "cls_id": cls_id,
+            "conf": float(confidences[i]),
+            "xyxy": [fx1, fy1, fx2, fy2],
+            "cx_norm": max(0.0, min(1.0, cx_norm)),
+            "cy_norm": max(0.0, min(1.0, cy_norm)),
+        })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Captura de frame via OpenCV
+# ---------------------------------------------------------------------------
+
+class _CapManager:
+    """Gerencia conexoes VideoCapture com backoff automatico."""
+
+    def __init__(self) -> None:
+        self._caps: Dict[str, Any] = {}
+        self._fail_ts: Dict[str, float] = {}
+
+    def get(self, stream_key: str, source_url: str, backoff_s: float = 5.0):
+        import cv2
+        cap = self._caps.get(stream_key)
+        if cap is not None:
+            return cap
+
+        now = time.time()
+        if (now - float(self._fail_ts.get(stream_key) or 0)) < backoff_s:
+            return None
+
+        try:
+            cap = cv2.VideoCapture(source_url, cv2.CAP_FFMPEG)
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+            if not cap.isOpened():
+                cap.release()
+                self._fail_ts[stream_key] = time.time()
+                return None
+            self._caps[stream_key] = cap
+            return cap
+        except Exception:
+            self._fail_ts[stream_key] = time.time()
+            return None
+
+    def release(self, stream_key: str) -> None:
+        cap = self._caps.pop(stream_key, None)
+        try:
+            if cap:
+                cap.release()
+        except Exception:
+            pass
+
+    def release_inactive(self, active_keys: Set[str]) -> None:
+        for k in list(self._caps):
+            if k not in active_keys:
+                self.release(k)
+
+
+# ---------------------------------------------------------------------------
+# Worker Principal
+# ---------------------------------------------------------------------------
+
+class ONNXAIWorker:
+    """
+    Worker de IA usando ONNX Runtime — leve, sem PyTorch.
+    Interface compativel com AIWorker para substituicao direta.
+    """
+
+    def __init__(self, stream_manager) -> None:
+        self.manager = stream_manager
+        self.running = True
+        self._sess = requests.Session()
+        self._last_event_ts: Dict[Tuple[int, int, str], float] = {}
+        self._last_frame_ts: Dict[str, float] = {}
+        self._ort_session = None
+        self._classes: List[str] = []
+        self._cap_manager = _CapManager()
+
+        # Analiticos avancados
+        self._analytics_available = False
+        try:
+            from workers.ai_analytics import ZoneIntrusionDetector, LineCrossingDetector, PeopleCounter
+            self._zone_detector = ZoneIntrusionDetector()
+            self._line_detector = LineCrossingDetector()
+            self._people_counter = PeopleCounter()
+            self._analytics_available = True
+        except ImportError:
+            try:
+                from ai_analytics import ZoneIntrusionDetector, LineCrossingDetector, PeopleCounter
+                self._zone_detector = ZoneIntrusionDetector()
+                self._line_detector = LineCrossingDetector()
+                self._people_counter = PeopleCounter()
+                self._analytics_available = True
+            except ImportError:
+                pass
+
+    def stop(self) -> None:
+        self.running = False
+
+    # ---- Carregamento do modelo ----
+
+    def _load_model(self) -> bool:
+        if self._ort_session is not None:
+            return True
+        try:
+            import onnxruntime as ort
+        except ImportError:
+            logger.error("[AI-ONNX] onnxruntime nao instalado. Execute: pip install onnxruntime-directml")
+            return False
+
+        model_path = _find_model()
+        if not model_path:
+            logger.warning("[AI-ONNX] Modelo ONNX nao encontrado. Execute: python exportar_modelo.py")
+            return False
+
+        try:
+            providers = []
+            available = ort.get_available_providers()
+            if "DmlExecutionProvider" in available:
+                providers.append("DmlExecutionProvider")
+                logger.info("[AI-ONNX] Aceleracao GPU Windows (DirectML) habilitada.")
+            elif "CUDAExecutionProvider" in available:
+                providers.append("CUDAExecutionProvider")
+                logger.info("[AI-ONNX] Aceleracao NVIDIA CUDA habilitada.")
+            else:
+                logger.info("[AI-ONNX] Modo CPU (GPU nao disponivel).")
+            providers.append("CPUExecutionProvider")
+
+            self._ort_session = ort.InferenceSession(model_path, providers=providers)
+            self._classes = _load_classes()
+            logger.info(f"[AI-ONNX] Modelo carregado: {model_path} ({len(self._classes)} classes)")
+            return True
+        except Exception as e:
+            logger.error(f"[AI-ONNX] Erro ao carregar modelo: {e}")
+            return False
+
+    # ---- Analise de frame ----
+
+    def _should_analyze(self, stream_key: str, now: float) -> bool:
+        interval = _env_float("AI_FRAME_EVERY_SECONDS", 1.0)
+        last = float(self._last_frame_ts.get(stream_key) or 0.0)
+        if last and (now - last) < max(0.1, interval):
+            return False
+        self._last_frame_ts[stream_key] = now
+        return True
+
+    def _cooldown_ok(self, device_id: int, channel: int, event_key: str, now: float) -> bool:
+        cooldown = _env_float("AI_EVENT_COOLDOWN_SECONDS", 45.0)
+        k = (int(device_id), int(channel), event_key)
+        last = float(self._last_event_ts.get(k) or 0.0)
+        if last and (now - last) < cooldown:
+            return False
+        self._last_event_ts[k] = now
+        return True
+
+    # ---- Snapshot ----
+
+    def _snapshot_b64(self, frame: Any, stream_key: str) -> str:
+        if not _bool(os.getenv("AI_SEND_SNAPSHOT") or "1"):
+            return ""
+        try:
+            import cv2
+            import numpy as np
+            max_w = _env_int("AI_SNAPSHOT_MAX_WIDTH", 640)
+            quality = _env_int("AI_SNAPSHOT_JPEG_QUALITY", 75)
+            h, w = frame.shape[:2]
+            if max_w > 0 and w > max_w:
+                scale = float(max_w) / float(w)
+                frame = cv2.resize(frame, (max_w, max(1, int(h * scale))))
+            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            if ok:
+                return base64.b64encode(buf.tobytes()).decode("ascii")
+        except Exception:
+            pass
+        return ""
+
+    # ---- Envio de evento ----
+
+    def _push_event(
+        self,
+        token: str,
+        device_id: int,
+        channel: int,
+        event_type: str,
+        severity: str,
+        description: str,
+        snapshot_jpg_b64: str = "",
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        url = _sanitize(os.getenv("EDGE_PUSH_URL") or "http://127.0.0.1:8808/api/push")
+        payload: Dict[str, Any] = {
+            "token": token or "x",
+            "device_id": int(device_id),
+            "channel": int(channel),
+            "event_type": _sanitize(event_type),
+            "severity": _sanitize(severity) or "info",
+            "description": str(description)[:400],
+        }
+        if snapshot_jpg_b64:
+            payload["snapshot_jpg_b64"] = snapshot_jpg_b64
+        if isinstance(extra, dict):
+            for k, v in extra.items():
+                kk = _sanitize(k)
+                if kk and kk not in payload:
+                    if isinstance(v, (int, float, str, list)):
+                        payload[kk] = v
+        try:
+            r = self._sess.post(url, json=payload, headers={"x-event-source": "ai-onnx"}, timeout=(3, 8))
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    # ---- Loop principal ----
+
+    def run(self) -> None:
+        if not _bool(os.getenv("ENABLE_AI_ANALYTICS") or "0"):
+            logger.info("[AI-ONNX] ENABLE_AI_ANALYTICS=0, worker desativado.")
+            return
+
+        if not self._load_model():
+            logger.error("[AI-ONNX] Nao foi possivel carregar o modelo. Worker encerrado.")
+            return
+
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            logger.error("[AI-ONNX] opencv-python nao instalado. Execute: pip install opencv-python")
+            return
+
+        logger.info("[AI-ONNX] Worker iniciado (ONNX Runtime).")
+
+        conf_threshold = _env_float("AI_CONF_THRESHOLD", 0.50)
+        nms_threshold = _env_float("AI_NMS_THRESHOLD", 0.45)
+        img_size = _env_int("AI_IMAGE_SIZE", 640)
+        allowed_classes = _csv_set(os.getenv("AI_CLASSES") or "person,car,motorcycle,truck,bus")
+        source_tmpl = _sanitize(os.getenv("AI_SOURCE_URL_TEMPLATE") or "rtsp://127.0.0.1:8554/{stream_key}")
+
+        input_name = self._ort_session.get_inputs()[0].name
+
+        while self.running:
+            try:
+                active = self.manager.get_configs() or {}
+                self._cap_manager.release_inactive(set(active.keys()))
+                now = time.time()
+
+                for stream_key, cfg in active.items():
+                    try:
+                        device_id = int(cfg.get("device_id") or 0)
+                        channel = int(cfg.get("channel") or 0)
+                        token = _sanitize(cfg.get("token") or "")
+                        tags = list(cfg.get("tags") or [])
+
+                        if device_id <= 0:
+                            continue
+                        if not self._should_analyze(stream_key, now):
+                            continue
+
+                        source_url = source_tmpl.replace("{stream_key}", stream_key)
+                        backoff = _env_float("AI_RECONNECT_BACKOFF_SECONDS", 5.0)
+                        cap = self._cap_manager.get(stream_key, source_url, backoff)
+                        if cap is None:
+                            continue
+
+                        ok, frame = cap.read()
+                        if not ok or frame is None:
+                            self._cap_manager.release(stream_key)
+                            continue
+
+                        orig_h, orig_w = frame.shape[:2]
+
+                        # ---- Inferencia ONNX ----
+                        try:
+                            input_tensor, scale, pad = _preprocess(frame, img_size)
+                            output = self._ort_session.run(None, {input_name: input_tensor})
+                            detections = _postprocess(
+                                output, scale, pad, orig_h, orig_w,
+                                conf_threshold, nms_threshold,
+                                self._classes, allowed_classes or None,
+                            )
+                        except Exception as e:
+                            logger.debug(f"[AI-ONNX] Inferencia falhou em {stream_key}: {e}")
+                            continue
+
+                        # ---- Eventos por classe detectada ----
+                        best_by_event: Dict[str, Dict] = {}
+                        for det in detections:
+                            ev_type = f"ai_{det['cls_name']}_detected"
+                            prev = best_by_event.get(ev_type)
+                            if prev is None or det["conf"] > prev["conf"]:
+                                best_by_event[ev_type] = det
+
+                        for ev_type, det in best_by_event.items():
+                            cls_name = det["cls_name"]
+                            conf = det["conf"]
+                            now_evt = time.time()
+                            if not self._cooldown_ok(device_id, channel, ev_type, now_evt):
+                                continue
+                            sev = "warn" if cls_name == "person" else "info"
+                            snap = self._snapshot_b64(frame, stream_key)
+                            self._push_event(
+                                token, device_id, channel, ev_type, sev,
+                                f"{cls_name} detectado (conf={conf:.2f}) stream={stream_key}",
+                                snapshot_jpg_b64=snap,
+                                extra={
+                                    "ai_class": cls_name,
+                                    "ai_conf": conf,
+                                    "device_type": cfg.get("device_type") or "",
+                                    "tags": tags,
+                                },
+                            )
+
+                        # ---- Analiticos avancados (zona, linha, contagem) ----
+                        if self._analytics_available and detections:
+                            self._run_analytics(
+                                stream_key, token, device_id, channel,
+                                cfg, detections, frame, now,
+                            )
+
+                    except Exception:
+                        continue
+
+            except Exception as e:
+                logger.error(f"[AI-ONNX] Erro no loop principal: {e}")
+
+            time.sleep(max(0.05, _env_float("AI_LOOP_SLEEP_SECONDS", 0.3)))
+
+        logger.info("[AI-ONNX] Worker encerrado.")
+
+    # ---- Analiticos avancados ----
+
+    def _run_analytics(
+        self,
+        stream_key: str,
+        token: str,
+        device_id: int,
+        channel: int,
+        cfg: Dict[str, Any],
+        detections: List[Dict],
+        frame: Any,
+        now: float,
+    ) -> None:
+        tags = list(cfg.get("tags") or [])
+
+        if bool(os.getenv("AI_ZONES")):
+            for det in detections:
+                try:
+                    if self._zone_detector.check(stream_key, det["cls_name"], det["cx_norm"], det["cy_norm"]):
+                        if self._cooldown_ok(device_id, channel, f"zone:{det['cls_name']}", now):
+                            self._push_event(
+                                token, device_id, channel, "ai_zone_intrusion", "warn",
+                                f"{det['cls_name']} entrou na zona monitorada (conf={det['conf']:.2f})",
+                                snapshot_jpg_b64=self._snapshot_b64(frame, stream_key),
+                                extra={"ai_class": det["cls_name"], "ai_conf": det["conf"],
+                                       "ai_cx": det["cx_norm"], "ai_cy": det["cy_norm"],
+                                       "tags": tags + ["ai_zone"],
+                                       "device_type": cfg.get("device_type") or ""},
+                            )
+                except Exception:
+                    continue
+
+        if bool(os.getenv("AI_CROSSING_LINES")):
+            for det in detections:
+                try:
+                    if self._line_detector.check_all_lines(stream_key, det["cls_name"], det["cx_norm"], det["cy_norm"]):
+                        if self._cooldown_ok(device_id, channel, f"line:{det['cls_name']}", now):
+                            self._push_event(
+                                token, device_id, channel, "ai_line_crossing", "warn",
+                                f"{det['cls_name']} cruzou linha virtual (conf={det['conf']:.2f})",
+                                snapshot_jpg_b64=self._snapshot_b64(frame, stream_key),
+                                extra={"ai_class": det["cls_name"], "ai_conf": det["conf"],
+                                       "tags": tags + ["ai_line"],
+                                       "device_type": cfg.get("device_type") or ""},
+                            )
+                except Exception:
+                    continue
+
+        person_count = sum(1 for d in detections if d["cls_name"] == "person")
+        try:
+            crowd_alert, send_metric = self._people_counter.process(stream_key, person_count)
+            if crowd_alert:
+                max_count = _env_int("AI_PEOPLE_MAX_COUNT", 0)
+                self._push_event(
+                    token, device_id, channel, "ai_crowd_alert", "warn",
+                    f"Lotacao: {person_count} pessoas (limite: {max_count})",
+                    snapshot_jpg_b64=self._snapshot_b64(frame, stream_key),
+                    extra={"ai_people_count": person_count, "tags": tags + ["ai_count"],
+                           "device_type": cfg.get("device_type") or ""},
+                )
+            if send_metric and person_count > 0:
+                self._push_event(
+                    token, device_id, channel, "ai_people_count", "info",
+                    f"Contagem: {person_count} pessoa(s) em cena",
+                    extra={"ai_people_count": person_count, "tags": tags,
+                           "device_type": cfg.get("device_type") or ""},
+                )
+        except Exception:
+            pass

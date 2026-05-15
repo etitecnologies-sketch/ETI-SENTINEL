@@ -1,7 +1,21 @@
+# ---- Obrigatorio (nucleo do agente) ----
 python-dotenv>=1.0.0
 requests>=2.31.0
 psutil>=5.9.8
+
+# ---- Obrigatorio para IA (ONNX, leve) ----
+# Instale via: pip install onnxruntime-directml opencv-python numpy
+onnxruntime-directml>=1.16.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# ---- Opcional: ONVIF (descoberta de cameras) ----
 onvif-zeep>=0.2.12
 wsdiscovery>=2.1.2
+
+# ---- Opcional: Interface de bandeja Windows ----
 pystray>=0.19.5
 Pillow>=10.0.0
+
+# ---- Somente para exportar modelo (rodar uma vez, na maquina do dev) ----
+# pip install ultralytics

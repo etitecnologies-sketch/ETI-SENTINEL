@@ -42,8 +42,10 @@ def find_ffmpeg():
         return ffmpeg_path
 
     possible_paths = [
+        Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "ffmpeg.exe",
         Path(os.environ.get("LOCALAPPDATA", "")) / "ETI-SENTINEL" / "bin" / "ffmpeg.exe",
         Path(__file__).resolve().parent.parent / "bin" / "ffmpeg.exe",
+        Path(__file__).resolve().parent.parent.parent / "bin" / "ffmpeg.exe",
         Path("C:/Users") / os.environ.get("USERNAME", "") / "AppData" / "Local" / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe",
     ]
 

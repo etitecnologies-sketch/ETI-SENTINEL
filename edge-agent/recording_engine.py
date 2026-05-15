@@ -66,6 +66,8 @@ def _spawn_record(rtsp_url: str, transport: str, out_pattern: str, log_path: Pat
         "1",
         "-strftime",
         "1",
+        "-strftime_mkdir",   # <-- CORRECAO: ffmpeg cria os subdiretorios com tokens de data
+        "1",
         "-segment_time",
         str(int(os.getenv("RECORD_SEGMENT_SECONDS") or 10)),
         out_pattern,
@@ -133,9 +135,11 @@ def main() -> None:
                     transport = sanitize(s.get("transport") or "tcp")
                     rtsp_url = _build_rtsp_url(url, username, password)
 
-                    out_dir = base_dir / f"device_{device_id}" / f"ch_{ch}" / "%Y%m%d" / "%H"
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    out_pattern = str(out_dir / "seg_%Y%m%d_%H%M%S.mp4")
+                    # CORRECAO: nao criar diretorios com tokens strftime (%Y%m%d, %H)
+                    # O ffmpeg resolve esses tokens em tempo de execucao via -strftime_mkdir
+                    base_out_dir = base_dir / f"device_{device_id}" / f"ch_{ch}"
+                    base_out_dir.mkdir(parents=True, exist_ok=True)
+                    out_pattern = str(base_out_dir / "%Y%m%d" / "%H" / "seg_%Y%m%d_%H%M%S.mp4")
                     log_path = base_dir / f"device_{device_id}" / f"ch_{ch}" / "ffmpeg.log"
 
                     k = _key(device_id, ch, rtsp_url)
