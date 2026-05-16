@@ -54,6 +54,45 @@ _COCO_CLASSES = [
 
 
 # ---------------------------------------------------------------------------
+# Nomes em portugues e cores por classe
+# ---------------------------------------------------------------------------
+
+_LABELS_PT: Dict[str, str] = {
+    "person":     "Pessoa",
+    "car":        "Carro",
+    "motorcycle": "Moto",
+    "truck":      "Caminhao",
+    "bus":        "Onibus",
+    "bicycle":    "Bicicleta",
+    "dog":        "Cachorro",
+    "cat":        "Gato",
+    "boat":       "Embarcacao",
+    "airplane":   "Aviao",
+}
+
+_EMOJIS_CLS: Dict[str, str] = {
+    "person":     "👤",
+    "car":        "🚗",
+    "motorcycle": "🏍",
+    "truck":      "🚛",
+    "bus":        "🚌",
+    "bicycle":    "🚲",
+    "boat":       "⛵",
+    "airplane":   "✈️",
+}
+
+# BGR para OpenCV
+_CLASS_COLORS: Dict[str, tuple] = {
+    "person":     (0, 230, 0),    # Verde
+    "car":        (0, 165, 255),  # Laranja
+    "motorcycle": (0, 165, 255),  # Laranja
+    "truck":      (0, 80, 255),   # Vermelho-laranja
+    "bus":        (0, 0, 255),    # Vermelho
+    "bicycle":    (255, 200, 0),  # Ciano
+}
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -398,21 +437,56 @@ class ONNXAIWorker:
         self._last_event_ts[k] = now
         return True
 
-    # ---- Snapshot ----
+    # ---- Snapshot com bounding boxes ----
 
-    def _snapshot_b64(self, frame: Any, stream_key: str) -> str:
+    def _snapshot_b64(
+        self,
+        frame: Any,
+        stream_key: str,
+        detections: Optional[List[Dict]] = None,
+    ) -> str:
         if not _bool(os.getenv("AI_SEND_SNAPSHOT") or "1"):
             return ""
         try:
             import cv2
-            import numpy as np
-            max_w = _env_int("AI_SNAPSHOT_MAX_WIDTH", 640)
-            quality = _env_int("AI_SNAPSHOT_JPEG_QUALITY", 75)
-            h, w = frame.shape[:2]
+
+            max_w   = _env_int("AI_SNAPSHOT_MAX_WIDTH", 1280)
+            quality = _env_int("AI_SNAPSHOT_JPEG_QUALITY", 90)
+
+            img = frame.copy()
+            h, w = img.shape[:2]
+
+            # --- Desenha caixas ao redor de cada objeto detectado ---
+            if detections:
+                font       = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = max(0.45, min(0.75, w / 1000))
+                thickness  = max(1, int(w / 400))
+
+                for det in detections:
+                    try:
+                        x1, y1, x2, y2 = [int(v) for v in det["xyxy"]]
+                        cls_name = det["cls_name"]
+                        conf     = det["conf"]
+                        color    = _CLASS_COLORS.get(cls_name, (0, 200, 255))
+                        label_pt = _LABELS_PT.get(cls_name, cls_name.capitalize())
+                        label    = f"{label_pt} {int(conf * 100)}%"
+
+                        # Retangulo ao redor do objeto
+                        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness + 1)
+
+                        # Fundo escuro para o texto
+                        (lw, lh), _ = cv2.getTextSize(label, font, font_scale, thickness)
+                        cv2.rectangle(img, (x1, max(0, y1 - lh - 10)), (x1 + lw + 6, y1), color, -1)
+                        cv2.putText(img, label, (x1 + 3, y1 - 4), font, font_scale, (255, 255, 255), thickness)
+                    except Exception:
+                        continue
+
+            # --- Redimensiona se necessario ---
             if max_w > 0 and w > max_w:
                 scale = float(max_w) / float(w)
-                frame = cv2.resize(frame, (max_w, max(1, int(h * scale))))
-            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                img = cv2.resize(img, (max_w, max(1, int(h * scale))))
+
+            ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if ok:
                 return base64.b64encode(buf.tobytes()).decode("ascii")
         except Exception:
@@ -535,23 +609,40 @@ class ONNXAIWorker:
                             if prev is None or det["conf"] > prev["conf"]:
                                 best_by_event[ev_type] = det
 
+                        # Todas as deteccoes validas para desenhar na foto
+                        valid_dets = list(best_by_event.values())
+
                         for ev_type, det in best_by_event.items():
                             cls_name = det["cls_name"]
-                            conf = det["conf"]
-                            now_evt = time.time()
+                            conf     = det["conf"]
+                            now_evt  = time.time()
                             if not self._cooldown_ok(device_id, channel, ev_type, now_evt):
                                 continue
-                            sev = "warn" if cls_name == "person" else "info"
-                            snap = self._snapshot_b64(frame, stream_key)
+
+                            sev      = "warn" if cls_name == "person" else "info"
+                            emoji    = _EMOJIS_CLS.get(cls_name, "🔍")
+                            label_pt = _LABELS_PT.get(cls_name, cls_name.capitalize())
+                            cam_name = _sanitize(cfg.get("name") or stream_key)
+
+                            # Mensagem amigavel em portugues
+                            msg = (
+                                f"{emoji} {label_pt} detectada"
+                                f" • Cam: {cam_name}"
+                                f" • Confianca: {int(conf * 100)}%"
+                            )
+
+                            # Foto com caixas desenhadas
+                            snap = self._snapshot_b64(frame, stream_key, valid_dets)
+
                             self._push_event(
-                                token, device_id, channel, ev_type, sev,
-                                f"{cls_name} detectado (conf={conf:.2f}) stream={stream_key}",
+                                token, device_id, channel, ev_type, sev, msg,
                                 snapshot_jpg_b64=snap,
                                 extra={
-                                    "ai_class": cls_name,
-                                    "ai_conf": conf,
+                                    "ai_class":   cls_name,
+                                    "ai_conf":    round(conf, 3),
+                                    "ai_label":   label_pt,
                                     "device_type": cfg.get("device_type") or "",
-                                    "tags": tags,
+                                    "tags":        tags,
                                 },
                             )
 
