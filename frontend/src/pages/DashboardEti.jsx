@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Gauge, Network, RefreshCw, Stethoscope, Wifi } from "lucide-react";
+import { Activity, Camera, Gauge, Network, RefreshCw, Scan, Video, Zap } from "lucide-react";
 import { etiTheme, clamp, timeAgoPtBR } from "../eti/theme";
 import { Button, Card, Pill, Segmented } from "../components/eti/EtiUI";
 import { genSeries, InternetActivityCard, MiniList } from "./dashboard/dashboardParts";
@@ -127,16 +127,33 @@ export default function DashboardEti({ api, onToast, onGoTopology }) {
     }
   };
 
-  const topApps = [
-    { name: "Netflix" },
-    { name: "Instagram" },
-    { name: "YouTube" },
-    { name: "SSL/TLS" },
-    { name: "WhatsApp" },
-    { name: "QUIC" },
-    { name: "Google" },
-    { name: "TikTok" },
-  ];
+  // Detecções de IA dos eventos reais
+  const aiEvents = useMemo(() => {
+    return events
+      .filter((e) => (e.event_type || "").startsWith("ai_"))
+      .slice(0, 6);
+  }, [events]);
+
+  // Câmeras e DVRs dos dispositivos reais
+  const cameraDevices = useMemo(() => {
+    return devices.filter((d) => {
+      const t = String(d.type || d.tipo || "").toLowerCase();
+      return t.includes("camera") || t.includes("câmera") || t.includes("cam") ||
+             t.includes("dvr") || t.includes("nvr") || t.includes("speed") || t.includes("dome");
+    });
+  }, [devices]);
+
+  const _AI_LABELS = {
+    ai_person_detected:   "👤 Pessoa detectada",
+    ai_car_detected:      "🚗 Carro detectado",
+    ai_motorcycle_detected: "🏍 Moto detectada",
+    ai_truck_detected:    "🚛 Caminhão detectado",
+    ai_bus_detected:      "🚌 Ônibus detectado",
+    ai_zone_intrusion:    "🔴 Intrusão em zona",
+    ai_line_crossing:     "⚠️ Cruzou linha virtual",
+    ai_crowd_alert:       "👥 Alerta de lotação",
+    ai_people_count:      "📊 Contagem de pessoas",
+  };
 
   return (
     <div style={{ color: etiTheme.colors.text }}>
@@ -282,81 +299,72 @@ export default function DashboardEti({ api, onToast, onGoTopology }) {
               </Button>
               <Button
                 variant="secondary"
-                leftIcon={<Stethoscope size={16} />}
-                onClick={() => onToast?.("WiFi Doctor", "Abrir diagnóstico WiFi (demo)", "info")}
+                leftIcon={<Scan size={16} />}
+                onClick={() => onToast?.("Scanner", "Use o menu Descoberta para varrer câmeras na rede", "info")}
               >
-                WiFi Doctor
+                Varredura
               </Button>
             </div>
           </Card>
 
-          <Card title="Default WiFi Speeds" right={<Pill label="Conservative" color="neutral" />}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ color: etiTheme.colors.text3, fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                Channel Widths (MHz)
+          <Card title="Câmeras Monitoradas" right={<Pill label={`${cameraDevices.length} câmera${cameraDevices.length !== 1 ? "s" : ""}`} color="neutral" />}>
+            {cameraDevices.length === 0 ? (
+              <div style={{ color: etiTheme.colors.text3, fontSize: 13, padding: "8px 0" }}>
+                Nenhuma câmera ou DVR cadastrado.
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "56px 1fr", gap: 10, alignItems: "center" }}>
-                <div style={{ color: etiTheme.colors.text2, fontWeight: 900 }}>5 GHz</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {[20, 40, 80, 160].map((w) => (
-                    <Button
-                      key={w}
-                      size="sm"
-                      variant={w === 40 ? "primary" : "ghost"}
-                      onClick={() => onToast?.("WiFi", `Largura 5GHz: ${w}MHz (demo)`, "info")}
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {cameraDevices.slice(0, 5).map((cam) => {
+                  const st = String(cam.status || cam.estado || "").toLowerCase();
+                  const isOnline = st === "online" || st === "ok" || st === "ativo";
+                  return (
+                    <div
+                      key={cam.id || cam.name}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "8px 10px", borderRadius: 10,
+                        background: "rgba(0,0,0,0.18)",
+                        border: `1px solid ${etiTheme.colors.borderSoft}`,
+                      }}
                     >
-                      {w}
-                    </Button>
-                  ))}
-                </div>
-                <div style={{ color: etiTheme.colors.text2, fontWeight: 900 }}>6 GHz</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {[20, 40, 80, 160, 320].map((w) => (
-                    <Button
-                      key={w}
-                      size="sm"
-                      variant={w === 160 || w === 320 ? "primary" : "ghost"}
-                      onClick={() => onToast?.("WiFi", `Largura 6GHz: ${w}MHz (demo)`, "info")}
-                    >
-                      {w}
-                    </Button>
-                  ))}
-                </div>
+                      <Camera size={14} color={isOnline ? etiTheme.colors.success : etiTheme.colors.critical} />
+                      <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: etiTheme.colors.text }}>
+                        {cam.name || cam.nome || "Câmera"}
+                      </div>
+                      <div style={{ fontSize: 11, color: etiTheme.colors.text3 }}>{cam.ip || ""}</div>
+                      <Pill label={isOnline ? "Online" : "Offline"} color={isOnline ? "success" : "critical"} />
+                    </div>
+                  );
+                })}
+                {cameraDevices.length > 5 && (
+                  <div style={{ fontSize: 12, color: etiTheme.colors.text3, textAlign: "center" }}>
+                    +{cameraDevices.length - 5} câmera{cameraDevices.length - 5 !== 1 ? "s" : ""} no inventário
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </Card>
 
-          <Card
-            title="CyberSecure Enhanced"
-            right={
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => onToast?.("CyberSecure", "Ativar módulo de segurança (demo)", "info")}
-              >
-                Ativar
+          <Card title="Ações Rápidas" right={<Zap size={16} color={etiTheme.colors.cyan} />}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <Button variant="secondary" leftIcon={<Network size={14} />} onClick={() => onGoTopology?.(null)}>
+                Topologia
               </Button>
-            }
-          >
-            <div style={{ color: etiTheme.colors.text2, fontSize: 12, lineHeight: 1.45 }}>
-              Até 70K assinaturas • filtros de conteúdo • integração ETI Sentinel.
+              <Button variant="secondary" leftIcon={<Camera size={14} />} onClick={() => onToast?.("Câmeras", "Acesse o menu Dispositivos para gerenciar câmeras", "info")}>
+                Câmeras
+              </Button>
+              <Button variant="secondary" leftIcon={<Video size={14} />} onClick={() => onToast?.("Ao Vivo", "Acesse http://localhost:8808 para ver o stream local", "info")}>
+                Ao Vivo
+              </Button>
+              <Button variant="secondary" leftIcon={<Scan size={14} />} onClick={() => onToast?.("Varredura", "Acesse o menu Descoberta para escanear câmeras ONVIF", "info")}>
+                Descoberta
+              </Button>
             </div>
-            <div style={{ marginTop: 10 }}>
-              <button
-                type="button"
-                onClick={() => onToast?.("Widgets", "Configurar widgets (demo)", "info")}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: etiTheme.colors.cyan,
-                  fontWeight: 900,
-                  cursor: "pointer",
-                  padding: 0,
-                  letterSpacing: "0.06em",
-                }}
-              >
-                Dashboard Widgets
-              </button>
+            <div style={{ marginTop: 10, fontSize: 12, color: etiTheme.colors.text3, lineHeight: 1.5 }}>
+              Painel local do técnico:{" "}
+              <a href="http://localhost:8808" target="_blank" rel="noreferrer" style={{ color: etiTheme.colors.cyan, fontWeight: 700 }}>
+                localhost:8808
+              </a>
             </div>
           </Card>
         </div>
@@ -388,45 +396,65 @@ export default function DashboardEti({ api, onToast, onGoTopology }) {
             />
           </div>
 
-          <Card title="Top Apps">
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {topApps.map((a) => (
-                <button
-                  key={a.name}
-                  type="button"
-                  onClick={() => onToast?.("App", `${a.name} (demo)`, "info")}
-                  style={{
-                    width: 84,
-                    height: 70,
-                    borderRadius: 16,
-                    background: "rgba(0,0,0,0.18)",
-                    border: `1px solid ${etiTheme.colors.borderSoft}`,
-                    color: etiTheme.colors.text2,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontWeight: 900,
-                    fontSize: 12,
-                  }}
-                >
-                  {a.name}
-                </button>
-              ))}
-            </div>
+          <Card
+            title="Detecções de IA"
+            right={
+              aiEvents.length > 0
+                ? <Pill label={`${aiEvents.length} hoje`} color="warn" />
+                : <Pill label="IA ativa" color="success" />
+            }
+          >
+            {aiEvents.length === 0 ? (
+              <div style={{ color: etiTheme.colors.text3, fontSize: 13, padding: "12px 0", textAlign: "center" }}>
+                <Camera size={28} color={etiTheme.colors.text3} style={{ display: "block", margin: "0 auto 8px" }} />
+                Nenhuma detecção ainda. Passe em frente a uma câmera para testar.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {aiEvents.map((ev, i) => {
+                  const label = _AI_LABELS[ev.event_type] || (ev.event_type || "Detecção").replace("ai_", "").replace(/_/g, " ");
+                  const cam = ev.device_name || ev.source_name || "Câmera";
+                  const ts = timeAgoPtBR(ev.created_at || ev.timestamp || Date.now());
+                  const sev = String(ev.severity || "info").toLowerCase();
+                  return (
+                    <div
+                      key={ev.id || i}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "8px 10px", borderRadius: 10,
+                        background: "rgba(0,0,0,0.18)",
+                        border: `1px solid ${sev === "warn" ? "rgba(245,158,11,0.3)" : etiTheme.colors.borderSoft}`,
+                      }}
+                    >
+                      <div style={{ fontSize: 20, flexShrink: 0 }}>
+                        {label.split(" ")[0]}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: etiTheme.colors.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {label.replace(/^[^\s]+\s/, "")}
+                        </div>
+                        <div style={{ fontSize: 11, color: etiTheme.colors.text3 }}>{cam}</div>
+                      </div>
+                      <div style={{ fontSize: 11, color: etiTheme.colors.text3, flexShrink: 0 }}>{ts}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
 
           <Card
             title="Acesso rápido"
             right={
-              <Button variant="primary" leftIcon={<Wifi size={16} />} onClick={() => onToast?.("CFTV", "Abrir visão de câmeras (menu Câmeras)", "info")}>
-                CFTV
+              <Button variant="primary" leftIcon={<Video size={16} />}
+                onClick={() => window.open("http://localhost:8808", "_blank")}>
+                Painel Técnico
               </Button>
             }
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div style={{ color: etiTheme.colors.text2, fontSize: 12 }}>
-                Use a topologia para diagnosticar falhas e entender a cadeia de conexão.
+                A topologia mostra a cadeia de conexão da rede. O painel técnico exibe câmeras e eventos de IA.
               </div>
               <Button variant="secondary" leftIcon={<Network size={16} />} onClick={() => onGoTopology?.(null)}>
                 Abrir Topologia

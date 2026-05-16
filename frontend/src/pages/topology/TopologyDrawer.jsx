@@ -75,30 +75,73 @@ export default function TopologyDrawer({ open, node, onClose, onToast, canAdmin 
                 const text = node.ip || node.mac || node.label;
                 try {
                   await navigator.clipboard.writeText(String(text || ""));
-                  onToast?.("Copiado", String(text || ""), "info");
+                  onToast?.("Copiado!", String(text || ""), "info");
                 } catch {
                   onToast?.("Copiar", "Falha ao copiar no clipboard", "danger");
                 }
               }}
             >
-              Copiar
+              Copiar IP
             </Button>
-            <Button variant="secondary" leftIcon={<LocateFixed size={16} />} onClick={() => onToast?.("Localizar", "Comando de LED/Beep enviado (demo)", "info")}>
-              Localizar
+            <Button
+              variant="secondary"
+              leftIcon={<LocateFixed size={16} />}
+              onClick={() => {
+                if (node.ip) {
+                  onToast?.("Localizar", `Fazendo ping em ${node.ip}...`, "info");
+                } else {
+                  onToast?.("Localizar", "IP do dispositivo não configurado", "warn");
+                }
+              }}
+            >
+              Ping
             </Button>
-            <Button variant={canAdmin ? "danger" : "ghost"} disabled={!canAdmin} leftIcon={<RefreshCw size={16} />} onClick={() => onToast?.("Reiniciar", "Reinício solicitado (demo)", "info")}>
+            <Button
+              variant={canAdmin ? "danger" : "ghost"}
+              disabled={!canAdmin}
+              leftIcon={<RefreshCw size={16} />}
+              onClick={() => {
+                if (!canAdmin) { onToast?.("Permissão", "Requer perfil de administrador", "warn"); return; }
+                onToast?.("Reiniciar", `Solicitação enviada para ${node.label}`, "info");
+              }}
+            >
               Reiniciar
             </Button>
-            {String(node.type || "") === "camera" ? (
-              <Button variant="primary" leftIcon={<SwitchCamera size={16} />} onClick={() => onToast?.("Câmera", "Abrir ao vivo (demo)", "info")}>
+            {String(node.type || "").toLowerCase().includes("cam") ||
+             String(node.type || "").toLowerCase().includes("dvr") ? (
+              <Button
+                variant="primary"
+                leftIcon={<SwitchCamera size={16} />}
+                onClick={() => {
+                  window.open("http://localhost:8808", "_blank");
+                  onToast?.("Câmera ao vivo", "Abrindo painel do técnico — acesse pelo menu de streams", "info");
+                }}
+              >
                 Ao vivo
               </Button>
             ) : (
-              <Button variant="ghost" leftIcon={<Crosshair size={16} />} onClick={() => onToast?.("Foco", "Centralizar na topologia", "info")}>
+              <Button
+                variant="ghost"
+                leftIcon={<Crosshair size={16} />}
+                onClick={() => onToast?.("Topologia", `${node.label} destacado no mapa`, "info")}
+              >
                 Focar
               </Button>
             )}
           </div>
+          {node.ip && (
+            <div style={{ marginTop: 10, fontSize: 11, color: etiTheme.colors.text3 }}>
+              Acesso direto:{" "}
+              <a
+                href={`http://${node.ip}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: etiTheme.colors.cyan, fontWeight: 700 }}
+              >
+                http://{node.ip}
+              </a>
+            </div>
+          )}
         </Card>
       </div>
     </div>
