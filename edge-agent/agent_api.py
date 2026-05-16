@@ -709,11 +709,15 @@ class PushRelay:
                 pass
         
         safe_payload.pop("snapshot_jpg_b64", None)
+        key = self._collector_key()
         try:
             r = self._sess.post(
                 url + "/push",
                 json=safe_payload,
-                headers={"x-event-source": sanitize(source or "edge")},
+                headers={
+                    "x-event-source": sanitize(source or "edge"),
+                    "x-collector-key": key,
+                },
                 timeout=(5, 12),
             )
             ok = r.status_code == 200
@@ -1013,6 +1017,11 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             n = 0
         if n <= 0:
+            return {}
+        try:
+            raw = self.rfile.read(n)
+            return json.loads(raw.decode("utf-8", errors="replace")) or {}
+        except Exception:
             return {}
 
     def _authorized(self) -> bool:

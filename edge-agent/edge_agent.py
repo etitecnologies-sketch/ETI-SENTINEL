@@ -333,7 +333,13 @@ def run_speedtest():
 
 
 def main() -> None:
-    here = Path(__file__).resolve().parent
+    # Quando compilado como EXE (PyInstaller --onefile), __file__ aponta para
+    # a pasta de extracao temporaria (_MEI...), nao para onde o EXE esta.
+    # sys.executable sempre aponta para o EXE real.
+    if getattr(sys, "frozen", False):
+        here = Path(sys.executable).resolve().parent
+    else:
+        here = Path(__file__).resolve().parent
     load_dotenv(here / ".env", override=True)
     env = os.environ.copy()
 
@@ -422,7 +428,17 @@ def main() -> None:
         except Exception as e:
             print(f"[WARN] Falha ao iniciar Agent API (relay): {e}")
     if enable_device:
-        specs.append([python, str(here / "device_monitor.py")])
+        if getattr(sys, "frozen", False):
+            # No EXE compilado nao ha Python para spawnar subprocessos —
+            # roda o device monitor como thread no mesmo processo.
+            try:
+                import device_monitor as _dm
+                threading.Thread(target=_dm.main, daemon=True, name="device-monitor").start()
+                print("[INFO] Device Monitor iniciado como thread (modo EXE).")
+            except Exception as e:
+                print(f"[WARN] Falha ao iniciar Device Monitor como thread: {e}")
+        else:
+            specs.append([python, str(here / "device_monitor.py")])
     if enable_streaming:
         try:
             from services.mediamtx_service import start_mediamtx

@@ -85,3 +85,4 @@ bin/*.yml
 # Memória interna do Claude Code (não é código do projeto)
 .claude/
 
+edge-agent/.env*

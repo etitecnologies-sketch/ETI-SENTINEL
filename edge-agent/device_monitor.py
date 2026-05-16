@@ -153,7 +153,11 @@ def _check_one(dev: Dict[str, Any], ingest_api_url: str, client_id: Optional[int
 
 
 def main() -> None:
-    here = Path(__file__).resolve().parent
+    import sys
+    if getattr(sys, "frozen", False):
+        here = Path(sys.executable).resolve().parent
+    else:
+        here = Path(__file__).resolve().parent
     load_dotenv(here / ".env", override=True)
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(asctime)s %(levelname)s %(message)s")
 
