@@ -263,7 +263,7 @@ class PushRelay:
         if et and et in suppress_list:
             suppress_notify = True
 
-        if et == "edge_heartbeat":
+        if et in {"edge_heartbeat", "gateway_heartbeat"}:
             suppress_notify = True
 
         state_key = None
@@ -698,7 +698,21 @@ class PushRelay:
         url = self._ingest_url()
         if not url:
             return False
-        
+
+        # Eventos de heartbeat interno sao sinais de monitoramento local.
+        # Nao devem ser encaminhados para a nuvem pois o HeartbeatWorker
+        # ja envia o sinal de vida com metricas do sistema separadamente.
+        et = sanitize((payload or {}).get("event_type") or "")
+        _no_forward = {"edge_heartbeat", "gateway_heartbeat"}
+        try:
+            extra = sanitize(self.env.get("EDGE_FORWARD_SUPPRESS_EVENT_TYPES") or "")
+            if extra:
+                _no_forward |= {sanitize(x) for x in extra.split(",") if sanitize(x)}
+        except Exception:
+            pass
+        if et in _no_forward:
+            return True  # Registra localmente mas nao envia para a nuvem
+
         # GARANTIA MULTITENANT: Força o client_id do agente antes de enviar para a nuvem
         cid = self._client_id()
         safe_payload = dict(payload or {})
