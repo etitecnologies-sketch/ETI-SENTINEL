@@ -1310,11 +1310,11 @@ class Handler(BaseHTTPRequestHandler):
 
   <!-- AÇÕES -->
   <div class="actions">
-    <button class="btn btn-green" onclick="fetchJSON('/api/status','Status Completo')">📊 Status JSON</button>
-    <button class="btn" onclick="fetchJSON('/api/events?limit=30','Últimos 30 Eventos')">📋 Todos os Eventos</button>
-    <button class="btn" onclick="fetchJSON('/api/events?event_type=ai_person_detected&limit=10','Detecções de Pessoa')">👤 Detecções IA</button>
-    <button class="btn" onclick="fetchJSON('/api/rules','Regras Ativas')">⚡ Regras</button>
-    <a href="{ingest_url.rstrip('/')}/health" target="_blank" class="btn">🌐 Health API</a>
+    <button class="btn btn-green" onclick="openModal('/api/status','📊 Status do Sistema',renderStatus)">📊 Status</button>
+    <button class="btn" onclick="openModal('/api/events?limit=30','📋 Últimos 30 Eventos',renderEvents)">📋 Eventos</button>
+    <button class="btn" onclick="openModal('/api/events?limit=20','🤖 Detecções de IA',renderAI)">🤖 IA / Câmeras</button>
+    <button class="btn" onclick="openModal('/api/rules','⚡ Regras de Automação',renderRules)">⚡ Regras</button>
+    <a href="{ingest_url.rstrip('/')}/health" target="_blank" class="btn">🌐 Servidor</a>
     <button class="btn btn-red" onclick="if(confirm('Recarregar dashboard?'))window.location.reload()">🔄 Recarregar</button>
   </div>
 
@@ -1366,25 +1366,145 @@ async function refreshData(){{
 }}
 setInterval(refreshData, 12000);
 
-// ---- Modal JSON ----
-async function fetchJSON(url, title){{
-  const mo = document.getElementById('modal');
-  document.getElementById('mo-title').textContent = title;
-  document.getElementById('mo-body').innerHTML = '<div style="text-align:center;padding:30px;color:#475569">Carregando...</div>';
+// ---- Helpers visuais ----
+const SEV_COLOR = {{warn:'#f59e0b',error:'#ef4444',critical:'#dc2626',info:'#22d3ee',success:'#00c9a7'}};
+const EV_ICON = {{videoloss:'📷',heartbeat:'💓',online:'🟢',offline:'🔴',stream:'📡',ai_:'🤖',gateway:'🔌',push:'📤'}};
+function evIcon(et){{
+  const k=Object.keys(EV_ICON).find(k=>(et||'').includes(k));
+  return k?EV_ICON[k]:'🔔';
+}}
+function fmtTs(ts){{
+  if(!ts)return'--';
+  const d=new Date((typeof ts==='number'&&ts<1e12)?ts*1000:ts);
+  return d.toLocaleString('pt-BR',{{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}});
+}}
+function pill(label,color){{
+  return`<span style="background:${{color||'#1e3a5f'}};color:#f8fafc;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px">${{label}}</span>`;
+}}
+
+// ---- Renderizador: Status do Sistema ----
+function renderStatus(d){{
+  const r=d.relay||{{}};
+  const lastPush=r.last_push_ok?fmtTs(r.last_push_ok):'Nunca';
+  const isOnline=r.last_push_ok&&(Date.now()/1000-r.last_push_ok)<60;
+  return`
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+    <div style="background:#0d1f35;border-radius:12px;padding:14px;text-align:center">
+      <div style="font-size:11px;color:#64748b;margin-bottom:6px">☁ CONEXÃO CLOUD</div>
+      <div style="font-size:20px;font-weight:800;color:${{isOnline?'#00c9a7':'#f59e0b'}}">${{isOnline?'● Online':'◌ Verificando'}}</div>
+    </div>
+    <div style="background:#0d1f35;border-radius:12px;padding:14px;text-align:center">
+      <div style="font-size:11px;color:#64748b;margin-bottom:6px">📦 FILA</div>
+      <div style="font-size:20px;font-weight:800;color:${{(r.queue_size||0)===0?'#00c9a7':'#f59e0b'}}">${{r.queue_size||0}} pacotes</div>
+    </div>
+    <div style="background:#0d1f35;border-radius:12px;padding:14px;text-align:center">
+      <div style="font-size:11px;color:#64748b;margin-bottom:6px">🔔 EVENTOS</div>
+      <div style="font-size:20px;font-weight:800;color:#3b9eff">${{r.events_total||0}}</div>
+    </div>
+  </div>
+  <div style="background:#0d1f35;border-radius:12px;overflow:hidden">
+    ${{[
+      ['Último envio para a nuvem', lastPush],
+      ['ID do Cliente', r.client_id||'—'],
+      ['Regras configuradas', (r.rules_count||0)+' regra(s)'],
+      ['Notificações suprimidas', (r.notify_suppressed_total||0)+' evento(s)'],
+    ].map(([l,v])=>`<div style="display:flex;justify-content:space-between;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.04)"><span style="color:#64748b;font-size:13px">${{l}}</span><span style="font-weight:700;font-size:13px;color:#cbd5e1">${{v}}</span></div>`).join('')}}
+  </div>`;
+}}
+
+// ---- Renderizador: Lista de Eventos ----
+function renderEvents(d){{
+  const evs=d.events||[];
+  if(!evs.length)return'<div style="text-align:center;padding:30px;color:#475569">Nenhum evento registrado ainda.</div>';
+  return`<div style="display:flex;flex-direction:column;gap:6px">${{
+    evs.map(e=>{{
+      const et=e.event_type||'';
+      const sev=String(e.severity||'info').toLowerCase();
+      const col=SEV_COLOR[sev]||'#22d3ee';
+      const desc=(e.description||et).slice(0,80);
+      const ts=fmtTs(e.timestamp||e.ts||e.created_at);
+      return`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#0d1f35;border-radius:10px;border-left:3px solid ${{col}}">
+        <span style="font-size:18px;flex-shrink:0">${{evIcon(et)}}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:#e2eaf5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${{desc}}</div>
+          <div style="font-size:11px;color:#475569;margin-top:2px">${{et}}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:11px;color:#475569">${{ts}}</div>
+          ${{pill(sev.toUpperCase(),col)}}
+        </div>
+      </div>`;
+    }}).join('')
+  }}</div>`;
+}}
+
+// ---- Renderizador: Detecções de IA ----
+function renderAI(d){{
+  const evs=(d.events||[]).filter(e=>(e.event_type||'').startsWith('ai_'));
+  if(!evs.length)return`<div style="text-align:center;padding:40px;color:#475569">
+    <div style="font-size:40px;margin-bottom:12px">🤖</div>
+    <div>Nenhuma detecção de IA registrada ainda.</div>
+    <div style="font-size:12px;margin-top:8px">Passe em frente a uma câmera para testar.</div>
+  </div>`;
+  return`<div style="display:flex;flex-direction:column;gap:10px">${{
+    evs.map(e=>{{
+      const desc=e.description||e.event_type||'Detecção';
+      const ts=fmtTs(e.timestamp||e.ts||e.created_at);
+      const snap=e.snapshot_jpg_b64;
+      return`<div style="background:#0d1f35;border-radius:12px;overflow:hidden;border:1px solid rgba(59,158,255,.15)">
+        ${{snap?`<img src="data:image/jpeg;base64,${{snap}}" style="width:100%;max-height:220px;object-fit:cover;cursor:pointer" onclick="openPhoto(this.src)" />`:'<div style="background:#0a1628;height:60px;display:flex;align-items:center;justify-content:center;color:#334155;font-size:28px">🎥</div>'}}
+        <div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;font-weight:700;color:#e2eaf5">${{desc.slice(0,70)}}</span>
+          <span style="font-size:11px;color:#475569;flex-shrink:0;margin-left:10px">${{ts}}</span>
+        </div>
+      </div>`;
+    }}).join('')
+  }}</div>`;
+}}
+
+// ---- Renderizador: Regras de Automação ----
+function renderRules(d){{
+  const rules=d.rules||[];
+  if(!rules.length)return`<div style="text-align:center;padding:40px;color:#475569">
+    <div style="font-size:40px;margin-bottom:12px">⚡</div>
+    <div>Nenhuma regra de automação configurada.</div>
+    <div style="font-size:12px;margin-top:8px">Configure regras no painel da Railway para automatizar alertas.</div>
+  </div>`;
+  return`<div style="display:flex;flex-direction:column;gap:8px">${{
+    rules.map(r=>{{
+      const cond=r.condition||r.trigger||'—';
+      const action=r.action||r.notify||'—';
+      const name=r.name||r.id||'Regra';
+      return`<div style="background:#0d1f35;border-radius:12px;padding:14px 16px">
+        <div style="font-size:14px;font-weight:800;color:#3b9eff;margin-bottom:8px">⚡ ${{name}}</div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:4px">SE</div>
+        <div style="font-size:13px;color:#e2eaf5;margin-bottom:8px">${{JSON.stringify(cond)}}</div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:4px">ENTÃO</div>
+        <div style="font-size:13px;color:#00c9a7">${{JSON.stringify(action)}}</div>
+      </div>`;
+    }}).join('')
+  }}</div>`;
+}}
+
+// ---- Dispatcher: chama o renderizador certo para cada URL ----
+async function openModal(url, title, renderer){{
+  const mo=document.getElementById('modal');
+  document.getElementById('mo-title').textContent=title;
+  document.getElementById('mo-body').innerHTML='<div style="text-align:center;padding:40px;color:#475569"><div style="font-size:30px;animation:pulse 1s infinite">⏳</div><div style="margin-top:12px">Carregando...</div></div>';
   mo.style.display='flex';
   try{{
-    const r = await fetch(url);
-    const d = await r.json();
-    document.getElementById('mo-body').innerHTML = '<pre class="json-pre">'+JSON.stringify(d,null,2)+'</pre>';
+    const r=await fetch(url);
+    const d=await r.json();
+    document.getElementById('mo-body').innerHTML=renderer(d);
   }}catch(e){{
-    document.getElementById('mo-body').innerHTML = '<div style="color:#ef4444">Erro: '+e+'</div>';
+    document.getElementById('mo-body').innerHTML=`<div style="text-align:center;padding:30px;color:#ef4444">❌ Erro ao carregar dados:<br><small>${{e}}</small></div>`;
   }}
 }}
 
-// ---- Modal Foto ----
+// ---- Modal Foto em tela cheia ----
 function openPhoto(src){{
-  document.getElementById('mo-title').textContent='Foto da Detecção';
-  document.getElementById('mo-body').innerHTML='<div class="photo-modal"><img src="'+src+'" /></div>';
+  document.getElementById('mo-title').textContent='📸 Foto da Detecção';
+  document.getElementById('mo-body').innerHTML=`<img src="${{src}}" style="width:100%;border-radius:8px;display:block"/>`;
   document.getElementById('modal').style.display='flex';
 }}
 
