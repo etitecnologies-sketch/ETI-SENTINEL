@@ -86,3 +86,5 @@ bin/*.yml
 .claude/
 
 edge-agent/.env*
+yolov8n.pt
+*.pt
