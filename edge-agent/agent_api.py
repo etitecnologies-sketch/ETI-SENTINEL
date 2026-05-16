@@ -1118,160 +1118,280 @@ class Handler(BaseHTTPRequestHandler):
                 last_push = format_ts(effective_last_push)
                 last_event = format_ts(relay_status.get("last_event_ts"))
                 
-                html = f"""
-                <!DOCTYPE html>
-                <html lang="pt-br">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>ETI SENTINEL - Dashboard do Técnico</title>
-                    <style>
-                        body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #070d18; color: #e2eaf5; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }}
-                        .container {{ max-width: 800px; width: 100%; }}
-                        .header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; background: #0b1525; padding: 20px; border-radius: 16px; border: 1px solid rgba(59, 158, 255, 0.1); }}
-                        .logo-area {{ display: flex; align-items: center; gap: 15px; }}
-                        .logo-dot {{ width: 12px; height: 12px; background: #00c9a7; border-radius: 50%; box-shadow: 0 0 15px #00c9a7; animation: pulse 2s infinite; }}
-                        @keyframes pulse {{ 0% {{ opacity: 0.4; }} 50% {{ opacity: 1; }} 100% {{ opacity: 0.4; }} }}
-                        h1 {{ margin: 0; font-size: 20px; letter-spacing: 1px; color: #3b9eff; }}
-                        
-                        .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 24px; }}
-                        .stat-card {{ background: #0b1525; padding: 20px; border-radius: 16px; border: 1px solid rgba(59, 158, 255, 0.05); }}
-                        .stat-label {{ color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }}
-                        .stat-value {{ font-size: 20px; font-weight: bold; color: #f8fafc; }}
-                        .stat-value.ok {{ color: #00c9a7; }}
-                        .stat-value.warn {{ color: #fbbf24; }}
-                        
-                        .info-table {{ background: #0b1525; border-radius: 16px; padding: 20px; border: 1px solid rgba(59, 158, 255, 0.05); margin-bottom: 24px; }}
-                        .info-row {{ display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }}
-                        .info-row:last-child {{ border-bottom: none; }}
-                        .info-label {{ color: #64748b; }}
-                        .info-val {{ font-weight: 500; color: #cbd5e1; }}
-                        
-                        .actions {{ display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }}
-                        .btn {{ background: #1e293b; color: #f8fafc; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.1); }}
-                        .btn:hover {{ background: #3b9eff; border-color: #3b9eff; transform: translateY(-2px); }}
-                        .btn-primary {{ background: #3b9eff; border-color: #3b9eff; }}
-                        
-                        .footer {{ margin-top: auto; padding: 40px 0 20px; color: #3a5c7a; font-size: 12px; text-align: center; }}
+                # Coleta eventos recentes e deteccoes de IA para o dashboard
+                events_all  = self.server.relay.events_recent(30)
+                ai_events   = [e for e in events_all if (e.get("event_type") or "").startswith("ai_") and e.get("snapshot_jpg_b64")][:4]
+                ev_feed     = [e for e in events_all if not (e.get("event_type") or "").startswith("ai_")][:8]
+                queue_ok    = relay_status.get("queue_size", 0) == 0
 
-                        /* Estilos para o Modal de Resultados */
-                        .modal-overlay {{ display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(5px); }}
-                        .modal-content {{ background: #0b1525; width: 90%; max-width: 700px; max-height: 80vh; border-radius: 16px; border: 1px solid rgba(59, 158, 255, 0.2); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }}
-                        .modal-header {{ padding: 15px 20px; background: rgba(59, 158, 255, 0.05); border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; }}
-                        .modal-title {{ font-weight: bold; color: #3b9eff; font-size: 14px; text-transform: uppercase; }}
-                        .modal-close {{ cursor: pointer; color: #64748b; font-size: 24px; line-height: 1; }}
-                        .modal-body {{ padding: 20px; overflow-y: auto; flex-grow: 1; }}
-                        .json-pre {{ margin: 0; font-family: 'Consolas', monospace; font-size: 12px; color: #00c9a7; white-space: pre-wrap; word-break: break-all; }}
-                    </style>
-                    <script>
-                        setTimeout(() => {{ if(!document.getElementById('modal').style.display || document.getElementById('modal').style.display === 'none') window.location.reload(); }}, 15000);
+                def sev_color(sev):
+                    return {"warn": "#f59e0b", "error": "#ef4444", "critical": "#dc2626"}.get(str(sev or ""), "#22d3ee")
 
-                        async function fetchData(url, title) {{
-                            const modal = document.getElementById('modal');
-                            const modalTitle = document.getElementById('modal-title');
-                            const modalBody = document.getElementById('modal-body');
-                            
-                            modalTitle.innerText = "Carregando...";
-                            modalBody.innerHTML = '<div style="text-align:center; padding: 20px; color: #64748b;">Buscando dados do agente...</div>';
-                            modal.style.display = 'flex';
+                def ev_icon(et):
+                    et = str(et or "")
+                    if "videoloss" in et: return "📷"
+                    if "heartbeat" in et: return "💓"
+                    if "online" in et:    return "🟢"
+                    if "offline" in et:   return "🔴"
+                    if "stream" in et:    return "📡"
+                    return "🔔"
 
-                            try {{
-                                const response = await fetch(url);
-                                const data = await response.json();
-                                modalTitle.innerText = title;
-                                modalBody.innerHTML = '<pre class="json-pre">' + JSON.stringify(data, null, 2) + '</pre>';
-                            }} catch (error) {{
-                                modalTitle.innerText = "Erro";
-                                modalBody.innerHTML = '<div style="color: #ef4444;">Falha ao carregar dados: ' + error + '</div>';
-                            }}
-                        }}
+                def fmt_ts(ts):
+                    if not ts: return "--"
+                    try: return time.strftime("%d/%m %H:%M:%S", time.localtime(float(ts)))
+                    except: return str(ts)
 
-                        function closeModal() {{
-                            document.getElementById('modal').style.display = 'none';
-                        }}
-                    </script>
-                </head>
-                <body>
-                    <!-- Modal -->
-                    <div id="modal" class="modal-overlay" onclick="if(event.target === this) closeModal()">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <div id="modal-title" class="modal-title">Título</div>
-                                <div class="modal-close" onclick="closeModal()">&times;</div>
-                            </div>
-                            <div id="modal-body" class="modal-body"></div>
+                ai_cards_html = ""
+                for ai in ai_events:
+                    et   = str(ai.get("event_type") or "")
+                    desc = str(ai.get("description") or et)
+                    snap = ai.get("snapshot_jpg_b64") or ""
+                    ts   = fmt_ts(ai.get("timestamp") or ai.get("ts"))
+                    ai_cards_html += f"""
+                    <div class="ai-card">
+                        <img src="data:image/jpeg;base64,{snap}" alt="deteccao" class="ai-img" onclick="openPhoto(this.src)"/>
+                        <div class="ai-info">
+                            <div class="ai-desc">{desc}</div>
+                            <div class="ai-ts">{ts}</div>
                         </div>
-                    </div>
+                    </div>"""
 
-                    <div class="container">
-                        <div class="header">
-                            <div class="logo-area">
-                                <div class="logo-dot"></div>
-                                <h1>ETI SENTINEL EDGE</h1>
-                            </div>
-                            <div style="font-size: 12px; color: #64748b;">v1.0.5-tecnico</div>
-                        </div>
+                ev_rows_html = ""
+                for ev in ev_feed:
+                    et   = str(ev.get("event_type") or "")
+                    desc = str(ev.get("description") or et)[:80]
+                    ts   = fmt_ts(ev.get("timestamp") or ev.get("ts"))
+                    sev  = str(ev.get("severity") or "info")
+                    ev_rows_html += f"""
+                    <div class="ev-row">
+                        <span class="ev-icon">{ev_icon(et)}</span>
+                        <span class="ev-desc">{desc}</span>
+                        <span class="ev-ts">{ts}</span>
+                        <span class="ev-dot" style="background:{sev_color(sev)}"></span>
+                    </div>"""
 
-                        <div class="grid">
-                            <div class="stat-card">
-                                <div class="stat-label">Conexão Cloud</div>
-                                <div class="stat-value {'ok' if is_cloud_online else 'warn'}">
-                                    {'Online' if is_cloud_online else 'Sincronizando...'}
-                                </div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-label">Eventos Totais</div>
-                                <div class="stat-value">{relay_status.get('events_total', 0)}</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-label">Fila de Envio</div>
-                                <div class="stat-value {'' if relay_status.get('queue_size', 0) == 0 else 'warn'}">
-                                    {relay_status.get('queue_size', 0)} pacotes
-                                </div>
-                            </div>
-                        </div>
+                html = f"""<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETI SENTINEL — Painel do Técnico</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:'Segoe UI',system-ui,sans-serif;background:#060e1c;color:#e2eaf5;min-height:100vh}}
+  /* HEADER */
+  .hdr{{background:#0b1525;border-bottom:1px solid rgba(59,158,255,.12);padding:14px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10}}
+  .hdr-dot{{width:10px;height:10px;border-radius:50%;background:#00c9a7;box-shadow:0 0 10px #00c9a7;animation:pulse 2s infinite}}
+  @keyframes pulse{{0%,100%{{opacity:.4}}50%{{opacity:1}}}}
+  .hdr-title{{font-size:17px;font-weight:700;color:#3b9eff;letter-spacing:.5px}}
+  .hdr-client{{font-size:13px;color:#00c9a7;font-weight:600;margin-left:auto}}
+  .hdr-time{{font-size:12px;color:#475569;margin-left:16px}}
+  /* LAYOUT */
+  .page{{max-width:1100px;margin:0 auto;padding:20px 16px}}
+  /* STAT CARDS */
+  .stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px}}
+  .sc{{background:#0b1525;border:1px solid rgba(255,255,255,.05);border-radius:14px;padding:16px 20px}}
+  .sc-label{{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}}
+  .sc-val{{font-size:22px;font-weight:700}}
+  .ok{{color:#00c9a7}}.warn{{color:#f59e0b}}.err{{color:#ef4444}}.blue{{color:#3b9eff}}
+  /* INFO TABLE */
+  .card{{background:#0b1525;border:1px solid rgba(255,255,255,.05);border-radius:14px;padding:18px 20px;margin-bottom:20px}}
+  .card-title{{font-size:13px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px;display:flex;align-items:center;gap:8px}}
+  .irow{{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)}}
+  .irow:last-child{{border:none}}
+  .ilabel{{color:#64748b;font-size:13px}}
+  .ival{{font-size:13px;font-weight:600;color:#cbd5e1}}
+  /* AI DETECTIONS */
+  .ai-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}}
+  .ai-card{{background:#0c1a2e;border:1px solid rgba(59,158,255,.12);border-radius:12px;overflow:hidden;transition:.2s}}
+  .ai-card:hover{{border-color:#3b9eff;transform:translateY(-2px)}}
+  .ai-img{{width:100%;height:130px;object-fit:cover;cursor:pointer;display:block}}
+  .ai-info{{padding:10px 12px}}
+  .ai-desc{{font-size:13px;font-weight:600;color:#e2eaf5;margin-bottom:4px}}
+  .ai-ts{{font-size:11px;color:#475569}}
+  .no-ai{{color:#334155;font-size:14px;text-align:center;padding:24px;width:100%}}
+  /* EVENTS FEED */
+  .ev-row{{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)}}
+  .ev-row:last-child{{border:none}}
+  .ev-icon{{font-size:16px;flex-shrink:0}}
+  .ev-desc{{flex:1;font-size:13px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+  .ev-ts{{font-size:11px;color:#475569;flex-shrink:0}}
+  .ev-dot{{width:7px;height:7px;border-radius:50%;flex-shrink:0}}
+  /* TWO COL */
+  .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}}
+  @media(max-width:700px){{.two-col{{grid-template-columns:1fr}}}}
+  /* ACTIONS */
+  .actions{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}}
+  .btn{{background:#1e293b;color:#f8fafc;border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s;text-decoration:none;display:inline-flex;align-items:center;gap:6px}}
+  .btn:hover{{background:#3b9eff;border-color:#3b9eff;transform:translateY(-1px)}}
+  .btn-green{{background:#065f46;border-color:#047857}}.btn-green:hover{{background:#047857}}
+  .btn-red{{background:#7f1d1d;border-color:#991b1b}}.btn-red:hover{{background:#dc2626}}
+  /* MODAL */
+  .mo{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(4px)}}
+  .mo-box{{background:#0b1525;border:1px solid rgba(59,158,255,.2);border-radius:16px;width:94%;max-width:780px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)}}
+  .mo-hdr{{padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;align-items:center}}
+  .mo-title{{font-weight:700;color:#3b9eff;font-size:14px;text-transform:uppercase}}
+  .mo-x{{cursor:pointer;color:#64748b;font-size:26px;line-height:1}}
+  .mo-body{{padding:20px;overflow-y:auto;flex:1}}
+  .json-pre{{font-family:Consolas,monospace;font-size:12px;color:#00c9a7;white-space:pre-wrap;word-break:break-all}}
+  .photo-modal img{{width:100%;border-radius:8px}}
+  /* FOOTER */
+  footer{{text-align:center;color:#334155;font-size:12px;padding:20px 0 30px}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="hdr-dot"></div>
+  <div class="hdr-title">ETI SENTINEL EDGE</div>
+  <div class="hdr-client">📍 {client_name}</div>
+  <div class="hdr-time" id="clock"></div>
+</div>
 
-                        <div class="info-table">
-                            <div class="info-row">
-                                <div class="info-label">Cliente (Nome Fantasia)</div>
-                                <div class="info-val" style="color: #00c9a7; font-weight: 800; text-transform: uppercase;">{client_name}</div>
-                            </div>
-                            <div class="info-row">
-                                <div class="info-label">ID do Cliente</div>
-                                <div class="info-val">{client_id}</div>
-                            </div>
-                            <div class="info-row">
-                                <div class="info-label">IP Gateway (Máquina)</div>
-                                <div class="info-val" style="color: #3b9eff; font-weight: 800;">{gateway_ip}</div>
-                            </div>
-                            <div class="info-row">
-                                <div class="info-label">Último Envio Cloud</div>
-                                <div class="info-val">{last_push}</div>
-                            </div>
-                            <div class="info-row">
-                                <div class="info-label">Último Evento Local</div>
-                                <div class="info-val">{last_event}</div>
-                            </div>
-                            <div class="info-row">
-                                <div class="info-label">Servidor Ingestão</div>
-                                <div class="info-val">{ingest_url}</div>
-                            </div>
-                        </div>
+<!-- Modal genérico (JSON / foto) -->
+<div id="modal" class="mo" onclick="if(event.target===this)closeModal()">
+  <div class="mo-box">
+    <div class="mo-hdr">
+      <div id="mo-title" class="mo-title">—</div>
+      <div class="mo-x" onclick="closeModal()">×</div>
+    </div>
+    <div id="mo-body" class="mo-body"></div>
+  </div>
+</div>
 
-                        <div class="actions">
-                            <button onclick="fetchData('/api/status', 'Status Completo (JSON)')" class="btn">JSON Status</button>
-                            <button onclick="fetchData('/api/events?limit=20', 'Últimos 20 Eventos')" class="btn">Logs Recentes</button>
-                            <button onclick="fetchData('/api/rules', 'Regras de Automação Ativas')" class="btn">Regras Ativas</button>
-                            <a href="https://eti-sentinel.com" target="_blank" class="btn btn-primary">Painel Cloud</a>
-                        </div>
+<div class="page">
 
-                        <div class="footer">
-                            &copy; 2026 ETI Tecnologies - Monitoramento Inteligente 24/7
-                        </div>
-                    </div>
-                </body>
-                </html>
-                """
+  <!-- STATUS CARDS -->
+  <div class="stats">
+    <div class="sc">
+      <div class="sc-label">☁ Conexão Cloud</div>
+      <div class="sc-val {'ok' if is_cloud_online else 'warn'}">{'● Online' if is_cloud_online else '◌ Sincronizando'}</div>
+    </div>
+    <div class="sc">
+      <div class="sc-label">📦 Fila de Envio</div>
+      <div class="sc-val {'ok' if queue_ok else 'warn'}">{relay_status.get('queue_size',0)} {'pacotes' if relay_status.get('queue_size',0)!=1 else 'pacote'}</div>
+    </div>
+    <div class="sc">
+      <div class="sc-label">🔔 Eventos Totais</div>
+      <div class="sc-val blue">{relay_status.get('events_total',0)}</div>
+    </div>
+    <div class="sc">
+      <div class="sc-label">⏱ Último Envio</div>
+      <div class="sc-val" style="font-size:16px;color:#94a3b8">{last_push}</div>
+    </div>
+  </div>
+
+  <!-- ÚLTIMAS DETECÇÕES DE IA -->
+  <div class="card">
+    <div class="card-title">🤖 Últimas Detecções de IA <span id="ai-badge" style="margin-left:auto;background:#1e3a5f;color:#60a5fa;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600">auto-atualiza</span></div>
+    <div id="ai-grid" class="ai-grid">
+      {''.join([ai_cards_html]) if ai_cards_html else '<div class="no-ai">Nenhuma detecção com foto ainda. Passe em frente à câmera para testar.</div>'}
+    </div>
+  </div>
+
+  <div class="two-col">
+    <!-- INFORMAÇÕES DO SISTEMA -->
+    <div class="card">
+      <div class="card-title">⚙️ Sistema</div>
+      <div class="irow"><span class="ilabel">Cliente</span><span class="ival" style="color:#00c9a7">{client_name}</span></div>
+      <div class="irow"><span class="ilabel">ID do Cliente</span><span class="ival">{client_id}</span></div>
+      <div class="irow"><span class="ilabel">IP Gateway</span><span class="ival" style="color:#3b9eff">{gateway_ip}</span></div>
+      <div class="irow"><span class="ilabel">Servidor</span><span class="ival" style="font-size:11px">{ingest_url}</span></div>
+      <div class="irow"><span class="ilabel">Último Evento</span><span class="ival">{last_event}</span></div>
+    </div>
+
+    <!-- FEED DE EVENTOS -->
+    <div class="card">
+      <div class="card-title">📋 Eventos Recentes</div>
+      <div id="ev-feed">
+        {''.join([ev_rows_html]) if ev_rows_html else '<div class="no-ai">Nenhum evento ainda.</div>'}
+      </div>
+    </div>
+  </div>
+
+  <!-- AÇÕES -->
+  <div class="actions">
+    <button class="btn btn-green" onclick="fetchJSON('/api/status','Status Completo')">📊 Status JSON</button>
+    <button class="btn" onclick="fetchJSON('/api/events?limit=30','Últimos 30 Eventos')">📋 Todos os Eventos</button>
+    <button class="btn" onclick="fetchJSON('/api/events?event_type=ai_person_detected&limit=10','Detecções de Pessoa')">👤 Detecções IA</button>
+    <button class="btn" onclick="fetchJSON('/api/rules','Regras Ativas')">⚡ Regras</button>
+    <a href="{ingest_url.rstrip('/')}/health" target="_blank" class="btn">🌐 Health API</a>
+    <button class="btn btn-red" onclick="if(confirm('Recarregar dashboard?'))window.location.reload()">🔄 Recarregar</button>
+  </div>
+
+  <footer>&copy; 2026 ETI Tecnologies · Monitoramento Inteligente 24/7 · v2.0</footer>
+</div>
+
+<script>
+// ---- Relógio ----
+function tick(){{ document.getElementById('clock').textContent = new Date().toLocaleTimeString('pt-BR'); }}
+tick(); setInterval(tick,1000);
+
+// ---- Auto-refresh dos dados (sem reload de página) ----
+async function refreshData(){{
+  try{{
+    const [evRes, aiRes] = await Promise.all([
+      fetch('/api/events?limit=8'),
+      fetch('/api/events?limit=4&event_type=ai_')
+    ]);
+    const evData = await evRes.json();
+    const aiData = await aiRes.json();
+
+    // Atualiza feed de eventos
+    const evFeed = document.getElementById('ev-feed');
+    const icons = {{videoloss:'📷',heartbeat:'💓',online:'🟢',offline:'🔴',stream:'📡'}};
+    const sevColors = {{warn:'#f59e0b',error:'#ef4444',critical:'#dc2626'}};
+    const evHtml = (evData.events||[])
+      .filter(e=>!((e.event_type||'').startsWith('ai_')))
+      .slice(0,8)
+      .map(e=>{{
+        const icon = Object.keys(icons).find(k=>(e.event_type||'').includes(k))||'🔔';
+        const dot = sevColors[e.severity]||'#22d3ee';
+        const ts = e.timestamp ? new Date(e.timestamp*1000).toLocaleTimeString('pt-BR') : '--';
+        const desc = (e.description||e.event_type||'').slice(0,70);
+        return `<div class="ev-row"><span class="ev-icon">${{icons[Object.keys(icons).find(k=>(e.event_type||'').includes(k))||'🔔']||icon}}</span><span class="ev-desc">${{desc}}</span><span class="ev-ts">${{ts}}</span><span class="ev-dot" style="background:${{dot}}"></span></div>`;
+      }}).join('') || '<div class="no-ai">Nenhum evento ainda.</div>';
+    if(evFeed) evFeed.innerHTML = evHtml;
+
+    // Atualiza detecções de IA
+    const aiGrid = document.getElementById('ai-grid');
+    const aiWithPhoto = (aiData.events||[]).filter(e=>e.snapshot_jpg_b64).slice(0,4);
+    if(aiGrid && aiWithPhoto.length>0){{
+      aiGrid.innerHTML = aiWithPhoto.map(e=>{{
+        const ts = e.timestamp ? new Date(e.timestamp*1000).toLocaleString('pt-BR') : '--';
+        const desc = (e.description||e.event_type||'').slice(0,60);
+        return `<div class="ai-card"><img src="data:image/jpeg;base64,${{e.snapshot_jpg_b64}}" class="ai-img" onclick="openPhoto(this.src)" alt="deteccao"/><div class="ai-info"><div class="ai-desc">${{desc}}</div><div class="ai-ts">${{ts}}</div></div></div>`;
+      }}).join('');
+    }}
+  }}catch(err){{console.warn('refresh error',err);}}
+}}
+setInterval(refreshData, 12000);
+
+// ---- Modal JSON ----
+async function fetchJSON(url, title){{
+  const mo = document.getElementById('modal');
+  document.getElementById('mo-title').textContent = title;
+  document.getElementById('mo-body').innerHTML = '<div style="text-align:center;padding:30px;color:#475569">Carregando...</div>';
+  mo.style.display='flex';
+  try{{
+    const r = await fetch(url);
+    const d = await r.json();
+    document.getElementById('mo-body').innerHTML = '<pre class="json-pre">'+JSON.stringify(d,null,2)+'</pre>';
+  }}catch(e){{
+    document.getElementById('mo-body').innerHTML = '<div style="color:#ef4444">Erro: '+e+'</div>';
+  }}
+}}
+
+// ---- Modal Foto ----
+function openPhoto(src){{
+  document.getElementById('mo-title').textContent='Foto da Detecção';
+  document.getElementById('mo-body').innerHTML='<div class="photo-modal"><img src="'+src+'" /></div>';
+  document.getElementById('modal').style.display='flex';
+}}
+
+function closeModal(){{ document.getElementById('modal').style.display='none'; }}
+</script>
+</body>
+</html>"""
                 self.end_headers()
                 self.wfile.write(html.encode("utf-8"))
                 return
