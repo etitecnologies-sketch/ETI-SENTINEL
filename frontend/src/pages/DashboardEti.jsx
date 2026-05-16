@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Camera, Gauge, Network, RefreshCw, Scan, Video, Zap } from "lucide-react";
+import { Activity, Camera, Gauge, Network, RefreshCw, Scan, Video, Wifi, Zap } from "lucide-react";
 import { etiTheme, clamp, timeAgoPtBR } from "../eti/theme";
 import { Button, Card, Pill, Segmented } from "../components/eti/EtiUI";
 import { genSeries, InternetActivityCard, MiniList } from "./dashboard/dashboardParts";
