@@ -402,6 +402,18 @@ class ONNXAIWorker:
             except ImportError:
                 pass
 
+        # Aprendizado comportamental
+        self._behavior = None
+        try:
+            from workers.behavioral_learner import BehavioralLearner
+            self._behavior = BehavioralLearner()
+        except ImportError:
+            try:
+                from behavioral_learner import BehavioralLearner
+                self._behavior = BehavioralLearner()
+            except ImportError:
+                pass
+
     def stop(self) -> None:
         self.running = False
 
@@ -625,6 +637,17 @@ class ONNXAIWorker:
                             logger.debug(f"[AI-ONNX] Inferencia falhou em {stream_key}: {e}")
                             continue
 
+                        # ---- Aprendizado comportamental ----
+                        person_count = sum(1 for d in detections if d["cls_name"] == "person")
+                        behavior_suppress = False
+                        if self._behavior:
+                            self._behavior.record(stream_key, person_count, now)
+                            is_anom, binfo = self._behavior.is_anomalous(stream_key, person_count)
+                            # Suprime alertas de pessoa quando comportamento é normal
+                            # (não suprime intrusão de zona, cruzamento de linha, etc.)
+                            if binfo.get("status") == "monitorando" and not is_anom:
+                                behavior_suppress = True
+
                         # ---- Eventos por classe detectada ----
                         best_by_event: Dict[str, Dict] = {}
                         for det in detections:
@@ -641,6 +664,10 @@ class ONNXAIWorker:
                             conf     = det["conf"]
                             now_evt  = time.time()
                             if not self._cooldown_ok(device_id, channel, ev_type, now_evt):
+                                continue
+
+                            # Suprime ai_person_detected quando comportamento é normal
+                            if behavior_suppress and ev_type == "ai_person_detected":
                                 continue
 
                             sev      = "warn" if cls_name == "person" else "info"

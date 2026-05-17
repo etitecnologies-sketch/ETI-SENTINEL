@@ -1576,6 +1576,13 @@ function closeModal(){{ document.getElementById('modal').style.display='none'; }
                 return self._json(200, {"ok": True, "events": self.server.relay.events_recent(lim, prefix=pfx, source=src, event_type=et)})
             if path == "/api/risk":
                 return self._json(200, {"ok": True, **self.server.relay._risk.snapshot()})
+            if path == "/api/behavior":
+                try:
+                    from workers.behavioral_learner import BehavioralLearner
+                    bl = BehavioralLearner()
+                    return self._json(200, {"ok": True, "cameras": bl.status()})
+                except Exception as e:
+                    return self._json(200, {"ok": True, "cameras": {}, "error": sanitize(str(e))})
             if path == "/api/recordings/list":
                 base_dir = Path(sanitize(self.server.env.get("RECORD_BASE_DIR") or str(Path(__file__).resolve().parent / ".recordings"))).resolve()
                 device_id = sanitize(q.get("device_id") or "")
