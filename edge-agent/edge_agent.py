@@ -553,6 +553,21 @@ def main() -> None:
                 threading.Thread(target=_start_ai_delayed, daemon=True, name="ai-worker").start()
             else:
                 print("[INFO] AI Worker desabilitado (sem modelo disponivel).")
+
+            # Etapa 4: Audio Anomaly Worker — inicia junto com o AI Worker
+            if _bool(env.get("ENABLE_AUDIO_ANOMALY", "0")):
+                try:
+                    from workers.audio_anomaly_detector import AudioAnomalyWorker
+                    audio_worker = AudioAnomalyWorker(manager)
+                    audio_delay = int(_sanitize(env.get("AI_STARTUP_DELAY_SECONDS") or "20") or 20) + 5
+                    def _start_audio_delayed():
+                        time.sleep(audio_delay)
+                        print("[INFO] Audio Anomaly Worker iniciando.")
+                        audio_worker.run()
+                    threading.Thread(target=_start_audio_delayed, daemon=True, name="audio-worker").start()
+                    print("[INFO] Audio Anomaly Worker habilitado.")
+                except Exception as e:
+                    print(f"[WARN] Falha ao iniciar Audio Anomaly Worker: {e}")
         except Exception as e:
             print(f"[ERROR] Falha ao iniciar streaming PRO: {e}")
     if enable_onvif:
