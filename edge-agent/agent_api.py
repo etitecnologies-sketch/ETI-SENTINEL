@@ -18,6 +18,7 @@ from edge_alert_format import format_telegram_alert
 from edge_notify import send_telegram, send_telegram_photo, send_whatsapp_twilio
 from edge_rules import RuleEngine, build_message
 from workers.risk_scorer import RiskScorer
+from workers.narrative_reporter import NarrativeReporter
 
 
 def _sanitize_base_url(url: str) -> str:
@@ -112,6 +113,7 @@ class PushRelay:
         self._stream_state: Dict[tuple, Dict[str, Any]] = {}
         self._recent_events: list = []
         self._risk = RiskScorer()
+        self._narrator = NarrativeReporter(env)
 
     def start(self) -> None:
         threading.Thread(target=self._loop_refresh, daemon=True).start()
@@ -463,6 +465,21 @@ class PushRelay:
                                 f"[Edge Notify] wa client={_mask(cwa)} ok={ok_client} | global={_mask(gwa)} ok={ok_global}"
                             )
                 fired_count += 1
+
+        if fired_count > 0:
+            d_id = ev.get("device_id")
+            d_name = ""
+            if isinstance(d_id, int) and d_id in devs:
+                d_name = devs[d_id].get("name") or devs[d_id].get("device_type") or ""
+            risk_snap = self._risk.snapshot()
+            log_enabled = _bool(self.env.get("EDGE_NOTIFY_LOG") or "0")
+            def _tg_follow_up(msg: str, _cfg: dict = cfg, _gcfg: dict = gcfg) -> None:
+                tok = _cfg.get("telegram_token") or ""
+                cid_t = _cfg.get("telegram_chat_id") or ""
+                if tok and cid_t:
+                    send_telegram(msg, tok, cid_t, log=log_enabled)
+            self._narrator.analyze_async(ev, d_name, risk_snap, _tg_follow_up)
+
         return fired_count
 
     def _loop_state(self) -> None:
