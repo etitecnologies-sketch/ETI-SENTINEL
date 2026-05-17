@@ -17,6 +17,7 @@ from camera_collector import discover_cameras
 from edge_alert_format import format_telegram_alert
 from edge_notify import send_telegram, send_telegram_photo, send_whatsapp_twilio
 from edge_rules import RuleEngine, build_message
+from workers.risk_scorer import RiskScorer
 
 
 def _sanitize_base_url(url: str) -> str:
@@ -110,6 +111,7 @@ class PushRelay:
         self._last_event_ts = 0.0
         self._stream_state: Dict[tuple, Dict[str, Any]] = {}
         self._recent_events: list = []
+        self._risk = RiskScorer()
 
     def start(self) -> None:
         threading.Thread(target=self._loop_refresh, daemon=True).start()
@@ -122,7 +124,7 @@ class PushRelay:
     def status(self) -> Dict[str, Any]:
         with self._lock:
             q = self._queue_size()
-            return {
+            data = {
                 "client_id": sanitize(self.env.get("CLIENT_ID") or ""),
                 "last_client_notify_fetch": self._last_cfg_ts,
                 "last_global_notify_fetch": self._last_global_cfg_ts,
@@ -135,6 +137,8 @@ class PushRelay:
                 "notify_suppressed_total": int(self._notify_suppressed_total),
                 "last_event_ts": float(self._last_event_ts),
             }
+        data["risk"] = self._risk.snapshot()
+        return data
 
     def rules_summary(self) -> Any:
         with self._lock:
@@ -248,6 +252,8 @@ class PushRelay:
             self._recent_events.append(rec)
             if len(self._recent_events) > 5000:
                 self._recent_events = self._recent_events[-2000:]
+
+        self._risk.ingest(ev)
 
         suppress_notify = False
         et = sanitize(ev.get("event_type") or "")
@@ -1170,6 +1176,11 @@ class Handler(BaseHTTPRequestHandler):
                         <span class="ev-dot" style="background:{sev_color(sev)}"></span>
                     </div>"""
 
+                risk_snap  = self.server.relay._risk.snapshot()
+                risk_score = risk_snap["score"]
+                risk_label = risk_snap["label"]
+                risk_color = risk_snap["color"]
+
                 html = f"""<!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -1278,6 +1289,11 @@ class Handler(BaseHTTPRequestHandler):
       <div class="sc-label">⏱ Último Envio</div>
       <div class="sc-val" style="font-size:16px;color:#94a3b8">{last_push}</div>
     </div>
+    <div class="sc">
+      <div class="sc-label">🛡 Score de Risco</div>
+      <div id="risk-score" class="sc-val" style="color:{risk_color}">{int(risk_score)}</div>
+      <div id="risk-label" style="font-size:11px;font-weight:700;letter-spacing:.5px;color:{risk_color};margin-top:2px">{risk_label}</div>
+    </div>
   </div>
 
   <!-- ÚLTIMAS DETECÇÕES DE IA -->
@@ -1329,12 +1345,21 @@ tick(); setInterval(tick,1000);
 // ---- Auto-refresh dos dados (sem reload de página) ----
 async function refreshData(){{
   try{{
-    const [evRes, aiRes] = await Promise.all([
+    const [evRes, aiRes, riskRes] = await Promise.all([
       fetch('/api/events?limit=8'),
-      fetch('/api/events?limit=4&event_type=ai_')
+      fetch('/api/events?limit=4&event_type=ai_'),
+      fetch('/api/risk')
     ]);
     const evData = await evRes.json();
     const aiData = await aiRes.json();
+    const riskData = await riskRes.json();
+    const rsEl = document.getElementById('risk-score');
+    const rlEl = document.getElementById('risk-label');
+    if(rsEl && riskData.score!==undefined){{
+      rsEl.textContent = Math.round(riskData.score);
+      rsEl.style.color = riskData.color||'#00c9a7';
+      if(rlEl){{ rlEl.textContent=riskData.label||'BAIXO'; rlEl.style.color=riskData.color||'#00c9a7'; }}
+    }}
 
     // Atualiza feed de eventos
     const evFeed = document.getElementById('ev-feed');
@@ -1532,6 +1557,8 @@ function closeModal(){{ document.getElementById('modal').style.display='none'; }
                 src = sanitize(q.get("source") or "")
                 et = sanitize(q.get("event_type") or "")
                 return self._json(200, {"ok": True, "events": self.server.relay.events_recent(lim, prefix=pfx, source=src, event_type=et)})
+            if path == "/api/risk":
+                return self._json(200, {"ok": True, **self.server.relay._risk.snapshot()})
             if path == "/api/recordings/list":
                 base_dir = Path(sanitize(self.server.env.get("RECORD_BASE_DIR") or str(Path(__file__).resolve().parent / ".recordings"))).resolve()
                 device_id = sanitize(q.get("device_id") or "")
