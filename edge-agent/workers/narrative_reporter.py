@@ -25,6 +25,7 @@ _TRIGGER_EVENTS = {
     "ai_line_crossing",
     "ai_crowd_alert",
     "ai_person_detected",
+    "ai_abandoned_object",
     "intrusion_detected",
     "motion_detected",
     "alarm_input",

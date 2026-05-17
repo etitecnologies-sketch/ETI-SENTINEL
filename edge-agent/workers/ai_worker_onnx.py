@@ -378,6 +378,18 @@ class ONNXAIWorker:
             except ImportError:
                 pass
 
+        # Detecção de abandono de objeto
+        self._abandon_manager = None
+        try:
+            from workers.abandoned_object_detector import AbandonedObjectManager
+            self._abandon_manager = AbandonedObjectManager()
+        except ImportError:
+            try:
+                from abandoned_object_detector import AbandonedObjectManager
+                self._abandon_manager = AbandonedObjectManager()
+            except ImportError:
+                pass
+
     def stop(self) -> None:
         self.running = False
 
@@ -732,3 +744,35 @@ class ONNXAIWorker:
                 )
         except Exception:
             pass
+
+        # ---- Detecção de abandono de objeto ----
+        if self._abandon_manager and _bool(os.getenv("ENABLE_AI_ANALYTICS") or "0"):
+            try:
+                abandon_events = self._abandon_manager.process(stream_key, detections, now)
+                for ab in abandon_events:
+                    if not self._cooldown_ok(device_id, channel, f"abandon:{ab['cls_name']}", now):
+                        continue
+                    cam_name = _sanitize(cfg.get("name") or stream_key)
+                    dur = ab["duration_seconds"]
+                    cls_pt = ab["cls_name"].replace("backpack", "mochila").replace(
+                        "suitcase", "mala").replace("handbag", "bolsa").replace(
+                        "umbrella", "guarda-chuva").replace("bottle", "garrafa")
+                    snap = self._snapshot_b64(
+                        frame, stream_key,
+                        [{"cls_name": ab["cls_name"], "conf": 0.99, "xyxy": ab["xyxy"]}],
+                    )
+                    self._push_event(
+                        token, device_id, channel, "ai_abandoned_object", "warn",
+                        f"⚠️ Objeto sem dono: {cls_pt} • Cam: {cam_name} • {dur:.0f}s sem responsável",
+                        snapshot_jpg_b64=snap,
+                        extra={
+                            "ai_class":        ab["cls_name"],
+                            "ai_duration_s":   dur,
+                            "ai_cx":           ab["cx_norm"],
+                            "ai_cy":           ab["cy_norm"],
+                            "tags":            tags + ["ai_abandon"],
+                            "device_type":     cfg.get("device_type") or "",
+                        },
+                    )
+            except Exception:
+                pass
