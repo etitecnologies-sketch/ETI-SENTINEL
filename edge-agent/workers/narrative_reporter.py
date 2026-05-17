@@ -26,6 +26,8 @@ _TRIGGER_EVENTS = {
     "ai_crowd_alert",
     "ai_person_detected",
     "ai_abandoned_object",
+    "plate_blacklisted",
+    "plate_unauthorized",
     "audio_glass_break",
     "audio_scream",
     "audio_alarm",

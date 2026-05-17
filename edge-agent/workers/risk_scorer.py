@@ -12,6 +12,8 @@ from typing import Dict, List, Tuple
 # Pontos base por tipo de evento (quanto cada ocorrência contribui ao score)
 _EVENT_WEIGHTS: Dict[str, float] = {
     "intrusion_detected":  32.0,
+    "plate_blacklisted":   35.0,
+    "plate_unauthorized":  20.0,
     "audio_glass_break":   35.0,
     "audio_scream":        32.0,
     "ai_abandoned_object": 30.0,

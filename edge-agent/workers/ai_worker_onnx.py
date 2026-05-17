@@ -390,6 +390,18 @@ class ONNXAIWorker:
             except ImportError:
                 pass
 
+        # Reconhecimento de placa veicular
+        self._plate_recognizer = None
+        try:
+            from workers.plate_recognizer import PlateRecognizer
+            self._plate_recognizer = PlateRecognizer()
+        except ImportError:
+            try:
+                from plate_recognizer import PlateRecognizer
+                self._plate_recognizer = PlateRecognizer()
+            except ImportError:
+                pass
+
     def stop(self) -> None:
         self.running = False
 
@@ -744,6 +756,43 @@ class ONNXAIWorker:
                 )
         except Exception:
             pass
+
+        # ---- Reconhecimento de placa veicular ----
+        if self._plate_recognizer and _bool(os.getenv("ENABLE_PLATE_RECOGNITION") or "0"):
+            try:
+                vehicle_dets = [d for d in detections if d["cls_name"] in {"car", "truck", "bus", "motorcycle"}]
+                for vdet in vehicle_dets[:3]:   # máximo 3 veículos por frame
+                    plate_key = f"plate:{vdet['cls_name']}:{int(vdet['cx_norm']*100)}"
+                    if not self._cooldown_ok(device_id, channel, plate_key, now):
+                        continue
+                    result = self._plate_recognizer.process(frame, vdet)
+                    if result is None:
+                        continue
+                    ev_type, severity, emoji = self._plate_recognizer.classify_access(
+                        result["plate_text"], result["whitelist"], result["blacklist"]
+                    )
+                    cam_name = _sanitize(cfg.get("name") or stream_key)
+                    if result["plate_text"]:
+                        plate_disp = result["plate_text"]
+                        conf_pct   = int(result["plate_conf"] * 100)
+                        desc = f"{emoji} Placa: {plate_disp} ({conf_pct}%) • Cam: {cam_name}"
+                    else:
+                        desc = f"🔍 Região de placa detectada (sem leitura OCR) • Cam: {cam_name}"
+                    snap = self._snapshot_b64(frame, stream_key, [vdet]) if not result["snap_b64"] else ""
+                    self._push_event(
+                        token, device_id, channel, ev_type, severity, desc,
+                        snapshot_jpg_b64=result["snap_b64"] or snap,
+                        extra={
+                            "plate_text":  result["plate_text"],
+                            "plate_valid": result["plate_valid"],
+                            "plate_conf":  result["plate_conf"],
+                            "ai_class":    vdet["cls_name"],
+                            "tags":        tags + ["plate"],
+                            "device_type": cfg.get("device_type") or "",
+                        },
+                    )
+            except Exception:
+                pass
 
         # ---- Detecção de abandono de objeto ----
         if self._abandon_manager and _bool(os.getenv("ENABLE_AI_ANALYTICS") or "0"):
