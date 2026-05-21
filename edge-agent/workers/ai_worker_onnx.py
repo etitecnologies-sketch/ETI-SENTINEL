@@ -394,6 +394,7 @@ class ONNXAIWorker:
         self._ort_session = None
         self._classes: List[str] = []
         self._cap_manager = _CapManager()
+        self._stream_urls: Dict[str, str] = {}  # stream_key -> URL da câmera
 
         # Analiticos avancados
         self._analytics_available = False
@@ -548,6 +549,16 @@ class ONNXAIWorker:
             max_w   = _env_int("AI_SNAPSHOT_MAX_WIDTH", 1280)
             quality = _env_int("AI_SNAPSHOT_JPEG_QUALITY", 90)
 
+            # Tenta capturar frame limpo via FFmpeg para resolver H.265/NV12.
+            # Cameras com H.265 geram frame cinza no OpenCV do EXE (bug de
+            # conversao de pixel format NV12 -> BGR). O FFmpeg do sistema
+            # entrega a imagem com cores corretas.
+            source_url = self._stream_urls.get(stream_key, "")
+            if source_url:
+                clean = self._capture_clean_frame(source_url)
+                if clean is not None:
+                    frame = clean
+
             img = frame.copy()
             h, w = img.shape[:2]
 
@@ -592,6 +603,57 @@ class ONNXAIWorker:
         except Exception:
             pass
         return ""
+
+    # ---- Captura de frame limpo via FFmpeg do sistema ----
+
+    def _ffmpeg_path(self) -> Optional[str]:
+        """Localiza o FFmpeg instalado junto com o ETI SENTINEL."""
+        candidates = [
+            Path(os.environ.get("PROGRAMDATA", "")) / "ETI-SENTINEL" / "bin" / "ffmpeg.exe",
+            Path(__file__).resolve().parent.parent.parent / "bin" / "ffmpeg.exe",
+            Path(__file__).resolve().parent.parent / "bin" / "ffmpeg.exe",
+        ]
+        for p in candidates:
+            if p.exists():
+                return str(p)
+        found = shutil.which("ffmpeg")
+        return found if found else None
+
+    def _capture_clean_frame(self, source_url: str) -> Optional[Any]:
+        """
+        Captura um frame diretamente via FFmpeg do sistema.
+
+        Resolve o problema de H.265/NV12: o OpenCV interno do EXE nao
+        converte corretamente o pixel format, resultando em imagem cinza.
+        O FFmpeg do sistema tem suporte completo a H.265 e entrega JPEG
+        correto que o OpenCV decodifica sem distorcoes.
+        """
+        import numpy as np
+        import cv2
+
+        ffmpeg = self._ffmpeg_path()
+        if not ffmpeg:
+            return None
+        try:
+            cmd = [
+                ffmpeg, "-y", "-loglevel", "error",
+                "-rtsp_transport", "tcp",
+                "-i", source_url,
+                "-vframes", "1",
+                "-q:v", "3",
+                "-f", "image2pipe",
+                "-vcodec", "mjpeg",
+                "pipe:1",
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=8)
+            if result.returncode == 0 and result.stdout:
+                arr = np.frombuffer(result.stdout, np.uint8)
+                img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if img is not None and float(np.std(img)) > 4.0:
+                    return img
+        except Exception as exc:
+            logger.debug(f"[AI-ONNX] FFmpeg clean frame falhou: {exc}")
+        return None
 
     # ---- Envio de evento ----
 
@@ -676,6 +738,7 @@ class ONNXAIWorker:
                             continue
 
                         source_url = source_tmpl.replace("{stream_key}", stream_key)
+                        self._stream_urls[stream_key] = source_url  # usado pelo _snapshot_b64
                         backoff = _env_float("AI_RECONNECT_BACKOFF_SECONDS", 5.0)
                         cap = self._cap_manager.get(stream_key, source_url, backoff)
                         if cap is None:
