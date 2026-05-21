@@ -52,6 +52,12 @@ _COCO_CLASSES = [
     "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
 ]
 
+# Classes de animais — usadas para rejeitar falsos positivos de "pessoa"
+_ANIMAL_CLASSES: Set[str] = {
+    "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe",
+}
+
 
 # ---------------------------------------------------------------------------
 # Nomes em portugues e cores por classe
@@ -192,7 +198,9 @@ def _letterbox(img, new_shape=640, color=(114, 114, 114)):
     right = int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
 
-    return img, scale, (dw, dh)
+    # Retorna o padding inteiro real aplicado (não o float dw/dh)
+    # Garante que _postprocess desfaça exatamente os pixels adicionados
+    return img, scale, (left, top)
 
 
 def _preprocess(frame, img_size: int = 640):
@@ -242,6 +250,7 @@ def _postprocess(
     boxes_xywh = boxes_xywh[mask]
     confidences = confidences[mask]
     class_ids = class_ids[mask]
+    scores_filtered = scores_all[mask]  # scores completos para checagem runner-up
 
     # Converte xywh -> xyxy no espaco do input (640x640)
     x1 = boxes_xywh[:, 0] - boxes_xywh[:, 2] / 2
@@ -274,6 +283,28 @@ def _postprocess(
             continue
 
         fx1, fy1, fx2, fy2 = float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i])
+
+        # ---- Filtros anti-falso-positivo exclusivos para "pessoa" ----
+        if cls_name == "person":
+            box_w = fx2 - fx1
+            box_h = fy2 - fy1
+
+            # Filtro 1 — proporção: pessoa é mais alta que larga.
+            # Animal de 4 patas tem caixa bem mais larga que alta (aspect < 0.4).
+            if box_w > 0 and box_h > 0 and (box_h / box_w) < 0.4:
+                continue
+
+            # Filtro 2 — runner-up: se o 2º melhor palpite do modelo for um animal
+            # e a diferença de confiança for pequena (< 0.15), o modelo está em dúvida
+            # → rejeita para evitar falso alarme.
+            scores_i = scores_filtered[i]
+            sorted_ids = np.argsort(scores_i)[::-1]
+            if len(sorted_ids) > 1:
+                runner_up_id = int(sorted_ids[1])
+                runner_up_name = (classes[runner_up_id] if classes and runner_up_id < len(classes) else "").lower()
+                if runner_up_name in _ANIMAL_CLASSES and (float(confidences[i]) - float(scores_i[runner_up_id])) < 0.15:
+                    continue
+
         cx_norm = ((fx1 + fx2) / 2.0) / max(1, orig_w)
         cy_norm = ((fy1 + fy2) / 2.0) / max(1, orig_h)
 
@@ -411,6 +442,18 @@ class ONNXAIWorker:
             try:
                 from behavioral_learner import BehavioralLearner
                 self._behavior = BehavioralLearner()
+            except ImportError:
+                pass
+
+        # Contador direcional de pessoas (Feature #7)
+        self._directional_counter = None
+        try:
+            from workers.directional_counter import DirectionalCounter
+            self._directional_counter = DirectionalCounter()
+        except ImportError:
+            try:
+                from directional_counter import DirectionalCounter
+                self._directional_counter = DirectionalCounter()
             except ImportError:
                 pass
 
@@ -848,6 +891,48 @@ class ONNXAIWorker:
                             "ai_cy":           ab["cy_norm"],
                             "tags":            tags + ["ai_abandon"],
                             "device_type":     cfg.get("device_type") or "",
+                        },
+                    )
+            except Exception:
+                pass
+
+        # ---- Contador direcional de pessoas (Feature #7) ----
+        if self._directional_counter and _bool(os.getenv("ENABLE_DIRECTIONAL_COUNTER") or "0"):
+            try:
+                crossing_events = self._directional_counter.process(stream_key, detections, now)
+                for ev in crossing_events:
+                    cam_name    = _sanitize(cfg.get("name") or stream_key)
+                    enter_total = ev["enter_total"]
+                    exit_total  = ev["exit_total"]
+                    occupancy   = ev["occupancy"]
+
+                    if ev["type"] == "enter":
+                        ev_type = "ai_people_enter"
+                        emoji, label = "🚶➡️", "Entrada"
+                    else:
+                        ev_type = "ai_people_exit"
+                        emoji, label = "⬅️🚶", "Saída"
+
+                    desc = (
+                        f"{emoji} {label} detectada • Cam: {cam_name}"
+                        f" • Entradas: {enter_total} | Saídas: {exit_total}"
+                        f" | Ocupação: {occupancy}"
+                    )
+
+                    person_dets = [d for d in detections if d["cls_name"] == "person"]
+                    snap = self._snapshot_b64(frame, stream_key, person_dets)
+
+                    self._push_event(
+                        token, device_id, channel, ev_type, "info", desc,
+                        snapshot_jpg_b64=snap,
+                        extra={
+                            "enter_total":  enter_total,
+                            "exit_total":   exit_total,
+                            "occupancy":    occupancy,
+                            "ai_cx":        ev["cx"],
+                            "ai_cy":        ev["cy"],
+                            "tags":         tags + ["ai_direction"],
+                            "device_type":  cfg.get("device_type") or "",
                         },
                     )
             except Exception:
