@@ -351,6 +351,10 @@ class _CapManager:
                 cap.release()
                 self._fail_ts[stream_key] = time.time()
                 return None
+            # Descarta os primeiros frames: decodificador RTSP demora
+            # alguns frames para inicializar e retorna cinza nesse período.
+            for _ in range(5):
+                cap.grab()
             self._caps[stream_key] = cap
             return cap
         except Exception:
@@ -573,9 +577,14 @@ class ONNXAIWorker:
                         continue
 
             # --- Redimensiona se necessario ---
+            # INTER_AREA é o melhor algoritmo para redução de tamanho:
+            # preserva detalhes finos sem artefatos de aliasing.
             if max_w > 0 and w > max_w:
                 scale = float(max_w) / float(w)
-                img = cv2.resize(img, (max_w, max(1, int(h * scale))))
+                img = cv2.resize(
+                    img, (max_w, max(1, int(h * scale))),
+                    interpolation=cv2.INTER_AREA,
+                )
 
             ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if ok:
@@ -675,6 +684,23 @@ class ONNXAIWorker:
                         ok, frame = cap.read()
                         if not ok or frame is None:
                             self._cap_manager.release(stream_key)
+                            continue
+
+                        # Normaliza formato: algumas câmeras enviam greyscale
+                        # (visão noturna) ou BGRA — converte sempre para BGR
+                        if frame.ndim == 2:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                        elif frame.ndim == 3 and frame.shape[2] == 4:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+                        # Descarta frame corrompido: decodificador não
+                        # inicializado ou pacote perdido geram cinza uniforme.
+                        # std < 4 significa todos os pixels quase iguais.
+                        if frame.size == 0 or float(np.std(frame)) < 4.0:
+                            logger.debug(
+                                f"[AI-ONNX] Frame descartado em {stream_key} "
+                                f"(cinza/corrompido, std={np.std(frame):.1f})"
+                            )
                             continue
 
                         orig_h, orig_w = frame.shape[:2]
