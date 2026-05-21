@@ -457,6 +457,18 @@ class ONNXAIWorker:
             except ImportError:
                 pass
 
+        # Detector de permanência prolongada (Feature #8)
+        self._loitering_detector = None
+        try:
+            from workers.loitering_detector import LoiteringDetector
+            self._loitering_detector = LoiteringDetector()
+        except ImportError:
+            try:
+                from loitering_detector import LoiteringDetector
+                self._loitering_detector = LoiteringDetector()
+            except ImportError:
+                pass
+
     def stop(self) -> None:
         self.running = False
 
@@ -891,6 +903,35 @@ class ONNXAIWorker:
                             "ai_cy":           ab["cy_norm"],
                             "tags":            tags + ["ai_abandon"],
                             "device_type":     cfg.get("device_type") or "",
+                        },
+                    )
+            except Exception:
+                pass
+
+        # ---- Detecção de permanência prolongada (Feature #8) ----
+        if self._loitering_detector and _bool(os.getenv("ENABLE_LOITERING") or "0"):
+            try:
+                loiter_alerts = self._loitering_detector.process(stream_key, detections, now)
+                for la in loiter_alerts:
+                    cam_name = _sanitize(cfg.get("name") or stream_key)
+                    dur_str  = la["duration_str"]
+                    prefix   = "🚨" if not la["first_alert"] else "⏱️"
+                    desc = (
+                        f"{prefix} Permanência suspeita: {dur_str} na área"
+                        f" • Cam: {cam_name}"
+                    )
+                    person_dets = [d for d in detections if d["cls_name"] == "person"]
+                    snap = self._snapshot_b64(frame, stream_key, person_dets)
+                    self._push_event(
+                        token, device_id, channel, "ai_loitering", "warn", desc,
+                        snapshot_jpg_b64=snap,
+                        extra={
+                            "ai_duration_s":  round(la["duration_seconds"], 1),
+                            "ai_duration_str": dur_str,
+                            "ai_cx":          la["cx"],
+                            "ai_cy":          la["cy"],
+                            "tags":           tags + ["ai_loitering"],
+                            "device_type":    cfg.get("device_type") or "",
                         },
                     )
             except Exception:
