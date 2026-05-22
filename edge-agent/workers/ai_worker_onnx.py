@@ -474,6 +474,18 @@ class ONNXAIWorker:
             except ImportError:
                 pass
 
+        # Mapa de calor de movimentação (Feature #9)
+        self._heatmap = None
+        try:
+            from workers.heatmap_generator import HeatmapGenerator
+            self._heatmap = HeatmapGenerator()
+        except ImportError:
+            try:
+                from heatmap_generator import HeatmapGenerator
+                self._heatmap = HeatmapGenerator()
+            except ImportError:
+                pass
+
     def stop(self) -> None:
         self.running = False
 
@@ -840,6 +852,34 @@ class ONNXAIWorker:
                                     "tags":        tags,
                                 },
                             )
+
+                        # ---- Mapa de calor de movimentacao (Feature #9) ----
+                        if self._heatmap and _bool(os.getenv("ENABLE_HEATMAP") or "0"):
+                            try:
+                                self._heatmap.record(stream_key, detections, frame)
+                                hm = self._heatmap.maybe_generate(stream_key, now)
+                                if hm:
+                                    cam_name  = _sanitize(cfg.get("name") or stream_key)
+                                    interval  = int(_env_float("AI_HEATMAP_INTERVAL_MINUTES", 60))
+                                    total_det = hm["total_detections"]
+                                    desc = (
+                                        f"🌡️ Mapa de calor • Cam: {cam_name}"
+                                        f" • {total_det} detecções no último {interval}min"
+                                    )
+                                    self._push_event(
+                                        token, device_id, channel,
+                                        "ai_heatmap", "info", desc,
+                                        snapshot_jpg_b64=hm["image_b64"],
+                                        extra={
+                                            "heatmap_total":   total_det,
+                                            "heatmap_peak":    hm["grid_max"],
+                                            "heatmap_minutes": interval,
+                                            "tags":            tags + ["ai_heatmap"],
+                                            "device_type":     cfg.get("device_type") or "",
+                                        },
+                                    )
+                            except Exception:
+                                pass
 
                         # ---- Analiticos avancados (zona, linha, contagem) ----
                         if self._analytics_available and detections:
