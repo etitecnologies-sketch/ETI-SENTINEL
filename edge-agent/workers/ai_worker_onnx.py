@@ -486,6 +486,18 @@ class ONNXAIWorker:
             except ImportError:
                 pass
 
+        # Detector de queda de pessoa (Feature #10)
+        self._fall_detector = None
+        try:
+            from workers.fall_detector import FallDetector
+            self._fall_detector = FallDetector()
+        except ImportError:
+            try:
+                from fall_detector import FallDetector
+                self._fall_detector = FallDetector()
+            except ImportError:
+                pass
+
     def stop(self) -> None:
         self.running = False
 
@@ -852,6 +864,39 @@ class ONNXAIWorker:
                                     "tags":        tags,
                                 },
                             )
+
+                        # ---- Detecção de queda de pessoa (Feature #10) ----
+                        if self._fall_detector and _bool(os.getenv("ENABLE_FALL_DETECTION") or "0"):
+                            try:
+                                fall_alerts = self._fall_detector.process(stream_key, detections, now)
+                                for fa in fall_alerts:
+                                    cam_name = _sanitize(cfg.get("name") or stream_key)
+                                    if fa["type"] == "fall_detected":
+                                        desc = f"🚨 QUEDA DETECTADA • Cam: {cam_name} • Pessoa caiu no chão"
+                                    else:
+                                        dur  = fa["duration_on_ground_s"]
+                                        desc = (
+                                            f"⚠️ Pessoa ainda no chão • Cam: {cam_name}"
+                                            f" • {dur:.0f}s desde a queda"
+                                        )
+                                    person_dets = [d for d in detections if d["cls_name"] == "person"]
+                                    snap = self._snapshot_b64(frame, stream_key, person_dets)
+                                    self._push_event(
+                                        token, device_id, channel,
+                                        "ai_fall_detected", "critical", desc,
+                                        snapshot_jpg_b64=snap,
+                                        extra={
+                                            "ai_aspect":          fa["aspect"],
+                                            "ai_cx":              fa["cx"],
+                                            "ai_cy":              fa["cy"],
+                                            "fall_type":          fa["type"],
+                                            "duration_on_ground": fa["duration_on_ground_s"],
+                                            "tags":               tags + ["ai_fall"],
+                                            "device_type":        cfg.get("device_type") or "",
+                                        },
+                                    )
+                            except Exception:
+                                pass
 
                         # ---- Mapa de calor de movimentacao (Feature #9) ----
                         if self._heatmap and _bool(os.getenv("ENABLE_HEATMAP") or "0"):
