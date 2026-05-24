@@ -1,11 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
-title ETI SENTINEL - Instalador v2.0
+title ETI SENTINEL - Instalador v2.1
 mode con: cols=70 lines=40
 color 0b
 
 :: ========================================================
-::  ETI SENTINEL EDGE - Instalador Profissional v2.0
+::  ETI SENTINEL EDGE - Instalador Profissional v2.1
 :: ========================================================
 
 :: ---- Verificacao de Administrador ----------------------
@@ -134,15 +134,22 @@ set "PS_TMP=%TEMP%\eti_setup_%RANDOM%.ps1"
     echo     'ENABLE_TRAY=0',
     echo     'ENABLE_RECORDING=0',
     echo     'LOG_LEVEL=INFO',
+    echo     'EDGE_SUPPRESS_EVENT_TYPES=edge_heartbeat,gateway_heartbeat',
+    echo     'EDGE_FORWARD_SUPPRESS_EVENT_TYPES=edge_heartbeat,gateway_heartbeat',
     echo     '# --- Analiticos de Video (requer ENABLE_AI_ANALYTICS=1) ---',
     echo     'ENABLE_AI_ANALYTICS=0',
     echo     'AI_STARTUP_DELAY_SECONDS=20',
     echo     'AI_CLASSES=person,car,motorcycle',
     echo     'AI_PEOPLE_MAX_COUNT=0',
     echo     '# AI_ZONES=[[0.0,0.0,1.0,1.0]]',
-    echo     '# AI_CROSSING_LINES=[[0.5,0.0,0.5,1.0]]'
+    echo     '# AI_CROSSING_LINES=[[0.5,0.0,0.5,1.0]]',
+    echo     '# --- Features Avancadas (ativar com =1) ---',
+    echo     '# ENABLE_DIRECTIONAL_COUNTER=1   # F7: Contador entrada/saida',
+    echo     '# ENABLE_LOITERING=1             # F8: Permanencia prolongada',
+    echo     '# ENABLE_HEATMAP=1               # F9: Mapa de calor',
+    echo     '# ENABLE_FALL_DETECTION=1        # F10: Queda de pessoa'
     echo ^)
-    echo $content ^| Set-Content -Path $Dest -Encoding UTF8
+    echo [System.IO.File]::WriteAllLines^($Dest, $content, [System.Text.UTF8Encoding]::new^($false^)^)
 ) > "!PS_TMP!"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_TMP!" ^
