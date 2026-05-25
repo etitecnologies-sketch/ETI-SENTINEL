@@ -755,18 +755,20 @@ def check_new_events(cur, conn):
         _load_channel_names(int(device_id))
         return channel_name_cache.get(k) or ""
 
+    _SILENT_TYPES = {"edge_heartbeat", "gateway_heartbeat"}
     events = cur.fetchall()
     for ev in events:
         eid, device_id, etype, channel, desc, sev, etime, dname, cid, dtype, mac, sn, ddesc, dloc = ev
         last_event_id = eid
 
-        if (etype or "").lower() == "edge_heartbeat":
+        if (etype or "").lower() in _SILENT_TYPES:
             continue
 
-        host_key = f"client:{cid}:dev:{device_id}:ch:{channel}"
+        host_key = f"client:{cid}:dev:{device_id}"
         cooldown_key = f"event:{etype}"
         if (sev or "").lower() != "critical" and is_in_cooldown(host_key, cooldown_key):
             continue
+        set_cooldown(host_key, cooldown_key)
         
         # Prepara a mensagem de alerta analítico
         edname = escape_html(dname)
@@ -821,8 +823,6 @@ def check_new_events(cur, conn):
                 logger.error(f"Email send error: {e}")
 
         send_whatsapp(msg.replace("<b>", "*").replace("</b>", "*"), wa_inst, wa_tok, wa_num)
-        
-        set_cooldown(host_key, cooldown_key)
 
 def evaluate_once():
     # Batimento cardíaco com resumo rápido

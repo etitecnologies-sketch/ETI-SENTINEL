@@ -703,6 +703,10 @@ function _uniqueTargets(targets) {
 }
 
 const _instantDedup = new Map();
+const INSTANT_COOLDOWN_MS = (() => {
+  const v = parseInt(process.env.ALERT_COOLDOWN || "60", 10);
+  return (Number.isFinite(v) && v > 0 ? v : 60) * 1000;
+})();
 function _instantShouldSend(key, ttlMs) {
   const now = Date.now();
   const prev = _instantDedup.get(key);
@@ -775,8 +779,8 @@ async function _sendInstantAnalyticsAlerts(devRow, eventType, channel, descripti
   const et = String(eventType || "");
   const desc = String(description || "");
 
-  const dedupKey = `analytics|${devRow.id || devRow.device_id || ""}|${et}|${ch}|${desc}`;
-  if (!_instantShouldSend(dedupKey, 2500)) return;
+  const dedupKey = `analytics|${devRow.id || devRow.device_id || ""}|${et}`;
+  if (!_instantShouldSend(dedupKey, INSTANT_COOLDOWN_MS)) return;
 
   const msgLines = [
     "🎬 ALERTA ANALÍTICO",
