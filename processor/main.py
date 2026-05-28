@@ -30,6 +30,7 @@ DATABASE_URL    = sanitize(os.environ.get("DATABASE_URL", ""))
 EVAL_INTERVAL   = int(os.getenv("EVAL_INTERVAL", "1")) # Ciclo ultra-rápido: 1s
 OFFLINE_TIMEOUT = int(os.getenv("OFFLINE_TIMEOUT", "120")) # Aumentado para 120s para evitar quedas falsas por oscilação de rede
 ALERT_COOLDOWN  = int(os.getenv("ALERT_COOLDOWN", "60"))
+AI_DETECTION_COOLDOWN = int(os.getenv("AI_DETECTION_COOLDOWN", "600"))  # 10 min padrão para detecções genéricas
 PING_TIMEOUT    = int(os.getenv("PING_TIMEOUT", "2"))
 PING_COUNT      = int(os.getenv("PING_COUNT", "1"))
 
@@ -235,6 +236,7 @@ def send_email(subject, body, to_email=None):
         except Exception as e: logger.error(f"Email error: {e}")
 
 def is_in_cooldown(host,expr): return (time.time()-alert_cooldown_map.get((host,expr),0))<ALERT_COOLDOWN
+def is_in_cooldown_for(host,expr,seconds): return (time.time()-alert_cooldown_map.get((host,expr),0))<seconds
 def set_cooldown(host,expr): alert_cooldown_map[(host,expr)]=time.time()
 
 def ping(ip, timeout=3):
@@ -755,18 +757,35 @@ def check_new_events(cur, conn):
         _load_channel_names(int(device_id))
         return channel_name_cache.get(k) or ""
 
-    _SILENT_TYPES = {"edge_heartbeat", "gateway_heartbeat"}
+    # Tipos silenciados: nunca geram notificação (métricas internas / heartbeats)
+    _SILENT_TYPES = {"edge_heartbeat", "gateway_heartbeat", "ai_people_count", "ai_heatmap", "ai_debug"}
+    # Tipos extras configuráveis via env (separados por vírgula)
+    _extra_suppress = os.getenv("PROCESSOR_SUPPRESS_EVENT_TYPES", "")
+    if _extra_suppress:
+        _SILENT_TYPES |= {s.strip().lower() for s in _extra_suppress.split(",") if s.strip()}
+
+    # Alertas de segurança com IA: cooldown curto (ALERT_COOLDOWN) — ação imediata requerida.
+    _AI_SECURITY_TYPES = {
+        "ai_zone_intrusion", "ai_line_crossing", "ai_fall_detected",
+        "ai_crowd_alert", "ai_abandoned_object", "ai_loitering",
+        "ai_plate_blocked",
+    }
+
     events = cur.fetchall()
     for ev in events:
         eid, device_id, etype, channel, desc, sev, etime, dname, cid, dtype, mac, sn, ddesc, dloc = ev
         last_event_id = eid
 
-        if (etype or "").lower() in _SILENT_TYPES:
+        et_low = (etype or "").lower()
+        if et_low in _SILENT_TYPES:
             continue
 
         host_key = f"client:{cid}:dev:{device_id}"
         cooldown_key = f"event:{etype}"
-        if (sev or "").lower() != "critical" and is_in_cooldown(host_key, cooldown_key):
+        # Qualquer evento ai_* que NÃO seja alerta de segurança é informativo → cooldown longo
+        is_generic_ai = et_low.startswith("ai_") and et_low not in _AI_SECURITY_TYPES
+        effective_cooldown = AI_DETECTION_COOLDOWN if is_generic_ai else ALERT_COOLDOWN
+        if (sev or "").lower() != "critical" and is_in_cooldown_for(host_key, cooldown_key, effective_cooldown):
             continue
         set_cooldown(host_key, cooldown_key)
         
@@ -790,7 +809,6 @@ def check_new_events(cur, conn):
         
         # Ícone baseado na severidade ou tipo
         icon = "🎬"
-        et_low = (etype or "").lower()
         if ("pessoa" in et_low) or ("human" in et_low) or ("person" in et_low):
             icon = "👤"
         elif ("veiculo" in et_low) or ("vehicle" in et_low) or ("car" in et_low) or ("truck" in et_low) or ("bus" in et_low):
