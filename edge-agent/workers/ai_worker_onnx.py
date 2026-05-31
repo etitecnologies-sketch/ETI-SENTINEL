@@ -17,7 +17,7 @@ Variaveis de ambiente:
   AI_ZONES               Zonas de intrusao JSON
   AI_CROSSING_LINES      Linhas virtuais JSON
   AI_FRAME_EVERY_SECONDS Intervalo entre frames analisados (padrao: 1.0)
-  AI_EVENT_COOLDOWN_SECONDS Cooldown entre eventos (padrao: 45)
+  AI_EVENT_COOLDOWN_SECONDS Cooldown entre eventos (padrao: 300)
   AI_STARTUP_DELAY_SECONDS  Delay de inicio em segundos (padrao: 20)
   ENABLE_AI_ANALYTICS    1 para ativar (padrao: 0)
 """
@@ -549,7 +549,7 @@ class ONNXAIWorker:
         return True
 
     def _cooldown_ok(self, device_id: int, channel: int, event_key: str, now: float) -> bool:
-        cooldown = _env_float("AI_EVENT_COOLDOWN_SECONDS", 45.0)
+        cooldown = _env_float("AI_EVENT_COOLDOWN_SECONDS", 300.0)
         k = (int(device_id), int(channel), event_key)
         last = float(self._last_event_ts.get(k) or 0.0)
         if last and (now - last) < cooldown:
