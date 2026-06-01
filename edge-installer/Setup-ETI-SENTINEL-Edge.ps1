@@ -1,14 +1,30 @@
+# Uso silencioso (deploy automatizado via GPO/Intune):
+# .\Setup-ETI-SENTINEL-Edge.ps1 -Silent -Ingest "https://..." -CollectorKey "sk-..." -ClientId "cli_001"
 param(
     [string]$Ingest,
     [string]$CollectorKey,
     [string]$ClientId,
     [switch]$Update,
+    [switch]$Silent,
     [string]$OfflineBundle,
     [string]$RepoZip,
     [string]$PythonExe
 )
 
 $ErrorActionPreference = "Stop"
+
+# ── VERSÕES DE DEPENDÊNCIAS ─────────────────────────────
+# Para atualizar uma dependência, altere apenas aqui.
+$DEP = @{
+    PythonVersion   = "3.12.10"
+    PythonUrl       = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+    WinswVersion    = "2.12.0"
+    WinswUrl        = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
+    MediamtxVersion = "1.9.0"
+    MediamtxUrl     = "https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/mediamtx_v1.9.0_windows_amd64.zip"
+    FfmpegUrl       = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+}
+# ────────────────────────────────────────────────────────
 
 try {
     $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -20,6 +36,13 @@ function Write-Ok([string]$m) { Write-Host "[OK]  $m" -ForegroundColor Green }
 function Write-Inf([string]$m) { Write-Host "[INFO] $m" -ForegroundColor Cyan }
 function Write-Wrn([string]$m) { Write-Host "[WARN] $m" -ForegroundColor Yellow }
 function Write-Err([string]$m) { Write-Host "[ERR] $m" -ForegroundColor Red }
+
+# Converte SecureString para texto plano sem expor o valor no console ou histórico
+function ConvertFrom-SecureStringPlain([SecureString]$ss) {
+    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+}
 
 function Test-Admin {
     try {
@@ -36,6 +59,7 @@ if (!(Test-Admin)) {
     if ($CollectorKey) { $argList += @("-CollectorKey", $CollectorKey) }
     if ($ClientId) { $argList += @("-ClientId", $ClientId) }
     if ($Update) { $argList += "-Update" }
+    if ($Silent) { $argList += "-Silent" }
     if ($OfflineBundle) { $argList += @("-OfflineBundle", $OfflineBundle) }
     if ($RepoZip) { $argList += @("-RepoZip", $RepoZip) }
     if ($PythonExe) { $argList += @("-PythonExe", $PythonExe) }
@@ -174,7 +198,7 @@ function Ensure-WinSW {
         return $winsw
     }
     Write-Inf "Baixando WinSW (Windows Service Wrapper)..."
-    $url = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
+    $url = $DEP.WinswUrl
     try {
         Download-File $url $winsw
         return $winsw
@@ -368,7 +392,7 @@ function Ensure-Python {
     $tmp = Join-Path $env:TEMP ("python-installer-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     $exe = Join-Path $tmp "python.exe"
-    $url = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+    $url = $DEP.PythonUrl
     try {
         Download-File $url $exe
         New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
@@ -432,7 +456,7 @@ function Ensure-MediaMTX {
     }
 
     Write-Inf "Baixando MediaMTX (Media Server para WebRTC/HLS)..."
-    $url = "https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/mediamtx_v1.9.0_windows_amd64.zip"
+    $url = $DEP.MediamtxUrl
     $tmp = Join-Path $env:TEMP "mediamtx-install"
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
     $zip = Join-Path $tmp "mediamtx.zip"
@@ -556,7 +580,7 @@ function Ensure-Ffmpeg {
 
     # Backup: Download direto se winget falhar ou não existir
     Write-Inf "Baixando ffmpeg portátil..."
-    $ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+    $ffmpegUrl = $DEP.FfmpegUrl
     $ffmpegTmp = Join-Path $env:TEMP "ffmpeg-install"
     $ffmpegZip = Join-Path $ffmpegTmp "ffmpeg.zip"
     New-Item -ItemType Directory -Force -Path $ffmpegTmp | Out-Null
@@ -1036,6 +1060,12 @@ try {
     icacls $installDir /grant "SYSTEM:(OI)(CI)F" /T | Out-Null
 } catch {}
 
+# Inicia log persistente — salvo em .logs mesmo que a instalação falhe
+$logDir  = Join-Path $installDir ".logs"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$logFile = Join-Path $logDir ("install-" + (Get-Date -Format "yyyy-MM-dd_HH-mm-ss") + ".log")
+try { Start-Transcript -Path $logFile -Append | Out-Null } catch {}
+
 try {
     Ensure-Python
     Ensure-Ffmpeg
@@ -1049,7 +1079,7 @@ try {
 
     $ingest = $Ingest.Trim()
     if (!$ingest -and $Update) { $ingest = $defaultIngest }
-    if (!$ingest) { $ingest = (Read-Host "INGEST_API_URL (Enter = $defaultIngest)").Trim() }
+    if (!$ingest -and -not $Silent) { $ingest = (Read-Host "INGEST_API_URL (Enter = $defaultIngest)").Trim() }
     if (!$ingest) { $ingest = $defaultIngest }
     $ingest = $ingest.Trim('`').Trim('"').Trim("'").Trim()
     if (!($ingest.StartsWith("http://") -or $ingest.StartsWith("https://"))) { $ingest = "https://$ingest" }
@@ -1057,14 +1087,20 @@ try {
 
     $key = $CollectorKey.Trim()
     if (!$key -and $Update) { $key = $defaultKey }
-    if (!$key) { $key = (Read-Host "COLLECTOR_KEY").Trim() }
+    if (!$key) {
+        if ($Silent) { throw "Modo -Silent requer -CollectorKey" }
+        # Oculta a digitação no terminal — valor não fica no histórico do console
+        $ssPwd = Read-Host "COLLECTOR_KEY" -AsSecureString
+        $key   = ConvertFrom-SecureStringPlain $ssPwd
+        $key   = $key.Trim()
+    }
     if (!$key) { $key = $defaultKey }
     $key = $key.Trim('`').Trim('"').Trim("'").Trim()
     if (!$key) { throw "COLLECTOR_KEY é obrigatório." }
 
     $cid = $ClientId.Trim()
     if (!$cid -and $Update) { $cid = $defaultCid }
-    if (!$cid) { $cid = (Read-Host "CLIENT_ID (opcional)").Trim() }
+    if (!$cid -and -not $Silent) { $cid = (Read-Host "CLIENT_ID (opcional)").Trim() }
     $cid = $cid.Trim('`').Trim('"').Trim("'").Trim()
 
     Download-Repo $installDir
@@ -1075,17 +1111,25 @@ try {
     Ensure-Venv $edgeDir
     Ensure-Services $installDir
 
-    $py = Join-Path $edgeDir ".venv\Scripts\python.exe"
+    $py    = Join-Path $edgeDir ".venv\Scripts\python.exe"
     $entry = Join-Path $edgeDir "edge_agent.py"
-    Write-Inf "Executando health-check (edge_agent.py --check)..."
-    & $py $entry --check
-    if ($LASTEXITCODE -ne 0) { throw "Health-check falhou. Verifique logs em $installDir\.logs e $edgeDir\.state" }
+    # Health-check com retry — aguarda o agente terminar o startup antes de validar
+    $healthOk = $false
+    for ($hc = 1; $hc -le 3; $hc++) {
+        Write-Inf "Health-check (tentativa $hc/3)..."
+        Start-Sleep -Seconds 5
+        & $py $entry --check
+        if ($LASTEXITCODE -eq 0) { $healthOk = $true; break }
+        if ($hc -lt 3) { Write-Wrn "Agente ainda iniciando, aguardando..." }
+    }
+    if (-not $healthOk) { throw "Health-check falhou após 3 tentativas. Verifique logs em $installDir\.logs" }
     Ensure-Icon $installDir
     Ensure-Shortcuts $installDir
 
     Write-Ok "Instalado. Edge iniciado e configurado para iniciar com o Windows."
     Write-Inf "Status: http://127.0.0.1:8808/api/status"
 } finally {
+    try { Stop-Transcript | Out-Null } catch {}
     if ($script:OfflineTemp) {
         try { Remove-Item $script:OfflineTemp -Recurse -Force -ErrorAction SilentlyContinue } catch {}
     }
