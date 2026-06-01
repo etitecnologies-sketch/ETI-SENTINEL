@@ -19,6 +19,8 @@ Variaveis de ambiente:
   AI_FRAME_EVERY_SECONDS Intervalo entre frames analisados (padrao: 1.0)
   AI_EVENT_COOLDOWN_SECONDS Cooldown entre eventos (padrao: 300)
   AI_STARTUP_DELAY_SECONDS  Delay de inicio em segundos (padrao: 20)
+  AI_MIN_BOX_AREA_PCT    Area minima da caixa em % do frame (padrao: 0.001 = 0.1%)
+  AI_MIN_CONFIRM_FRAMES  Frames consecutivos para confirmar deteccao (padrao: 2)
   ENABLE_AI_ANALYTICS    1 para ativar (padrao: 0)
 """
 
@@ -226,6 +228,7 @@ def _postprocess(
     nms_threshold: float = 0.45,
     classes: Optional[List[str]] = None,
     allowed_classes: Optional[Set[str]] = None,
+    min_box_area_pct: float = 0.001,
 ) -> List[Dict[str, Any]]:
     """Decodifica saida YOLOv8 ONNX: [1, 84, 8400] -> lista de deteccoes."""
     import numpy as np
@@ -283,6 +286,12 @@ def _postprocess(
             continue
 
         fx1, fy1, fx2, fy2 = float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i])
+
+        # Rejeita caixas menores que o limiar mínimo — elimina ruído de fundo, reflexos e insetos
+        if min_box_area_pct > 0:
+            box_area = (fx2 - fx1) * (fy2 - fy1)
+            if box_area < (orig_w * orig_h * min_box_area_pct):
+                continue
 
         # ---- Filtros anti-falso-positivo exclusivos para "pessoa" ----
         if cls_name == "person":
@@ -395,6 +404,7 @@ class ONNXAIWorker:
         self._classes: List[str] = []
         self._cap_manager = _CapManager()
         self._stream_urls: Dict[str, str] = {}  # stream_key -> URL da câmera
+        self._confirm_counts: Dict[Tuple[str, str], int] = {}  # (stream_key, cls_name) -> frames consecutivos
 
         # Analiticos avancados
         self._analytics_available = False
@@ -500,6 +510,25 @@ class ONNXAIWorker:
 
     def stop(self) -> None:
         self.running = False
+
+    def _update_confirm(self, stream_key: str, detected_cls: Set[str]) -> None:
+        """Incrementa classes detectadas neste frame; zera as ausentes."""
+        for (sk, cn) in list(self._confirm_counts.keys()):
+            if sk == stream_key:
+                if cn in detected_cls:
+                    self._confirm_counts[(sk, cn)] += 1
+                else:
+                    self._confirm_counts[(sk, cn)] = 0
+        for cn in detected_cls:
+            k = (stream_key, cn)
+            if k not in self._confirm_counts:
+                self._confirm_counts[k] = 1
+
+    def _is_confirmed(self, stream_key: str, cls_name: str, min_confirm: int) -> bool:
+        """Retorna True somente se a classe foi vista em frames consecutivos suficientes."""
+        if min_confirm <= 1:
+            return True
+        return self._confirm_counts.get((stream_key, cls_name), 0) >= min_confirm
 
     # ---- Carregamento do modelo ----
 
@@ -735,10 +764,12 @@ class ONNXAIWorker:
 
         logger.info("[AI-ONNX] Worker iniciado (ONNX Runtime).")
 
-        conf_threshold = _env_float("AI_CONF_THRESHOLD", 0.50)
-        nms_threshold = _env_float("AI_NMS_THRESHOLD", 0.45)
-        img_size = _env_int("AI_IMAGE_SIZE", 640)
-        allowed_classes = _csv_set(os.getenv("AI_CLASSES") or "person,car,motorcycle,truck,bus")
+        conf_threshold   = _env_float("AI_CONF_THRESHOLD", 0.50)
+        nms_threshold    = _env_float("AI_NMS_THRESHOLD", 0.45)
+        img_size         = _env_int("AI_IMAGE_SIZE", 640)
+        min_box_area_pct = _env_float("AI_MIN_BOX_AREA_PCT", 0.001)
+        min_confirm      = _env_int("AI_MIN_CONFIRM_FRAMES", 2)
+        allowed_classes  = _csv_set(os.getenv("AI_CLASSES") or "person,car,motorcycle,truck,bus")
         source_tmpl = _sanitize(os.getenv("AI_SOURCE_URL_TEMPLATE") or "rtsp://127.0.0.1:8554/{stream_key}")
 
         input_name = self._ort_session.get_inputs()[0].name
@@ -800,10 +831,14 @@ class ONNXAIWorker:
                                 output, scale, pad, orig_h, orig_w,
                                 conf_threshold, nms_threshold,
                                 self._classes, allowed_classes or None,
+                                min_box_area_pct,
                             )
                         except Exception as e:
                             logger.debug(f"[AI-ONNX] Inferencia falhou em {stream_key}: {e}")
                             continue
+
+                        # Atualiza contadores de confirmação por classe para este stream
+                        self._update_confirm(stream_key, {d["cls_name"] for d in detections})
 
                         # ---- Aprendizado comportamental ----
                         person_count = sum(1 for d in detections if d["cls_name"] == "person")
@@ -832,6 +867,10 @@ class ONNXAIWorker:
                             conf     = det["conf"]
                             now_evt  = time.time()
                             if not self._cooldown_ok(device_id, channel, ev_type, now_evt):
+                                continue
+
+                            # Aguarda N frames consecutivos antes de disparar — evita alarme de "fantasma"
+                            if not self._is_confirmed(stream_key, cls_name, min_confirm):
                                 continue
 
                             # Suprime ai_person_detected quando comportamento é normal
