@@ -508,6 +508,42 @@ class ONNXAIWorker:
             except ImportError:
                 pass
 
+        # Detector de fogo e fumaça (Feature #11)
+        self._fire_detector = None
+        try:
+            from workers.fire_smoke_detector import FireSmokeDetector
+            self._fire_detector = FireSmokeDetector()
+        except ImportError:
+            try:
+                from fire_smoke_detector import FireSmokeDetector
+                self._fire_detector = FireSmokeDetector()
+            except ImportError:
+                pass
+
+        # Detector de sabotagem de câmera (Feature #12)
+        self._tamper_detector = None
+        try:
+            from workers.tamper_detector import TamperDetector
+            self._tamper_detector = TamperDetector()
+        except ImportError:
+            try:
+                from tamper_detector import TamperDetector
+                self._tamper_detector = TamperDetector()
+            except ImportError:
+                pass
+
+        # Gravador de clips de alerta
+        self._clip_recorder = None
+        try:
+            from workers.clip_recorder import ClipRecorder
+            self._clip_recorder = ClipRecorder()
+        except ImportError:
+            try:
+                from clip_recorder import ClipRecorder
+                self._clip_recorder = ClipRecorder()
+            except ImportError:
+                pass
+
     def stop(self) -> None:
         self.running = False
 
@@ -822,6 +858,13 @@ class ONNXAIWorker:
                             continue
 
                         orig_h, orig_w = frame.shape[:2]
+
+                        # Alimenta buffer circular do gravador de clips (sempre, independente de IA)
+                        if self._clip_recorder:
+                            try:
+                                self._clip_recorder.push_frame(stream_key, frame.copy(), now)
+                            except Exception:
+                                pass
 
                         # ---- Inferencia ONNX ----
                         try:
@@ -1145,6 +1188,92 @@ class ONNXAIWorker:
                             "ai_cy":          la["cy"],
                             "tags":           tags + ["ai_loitering"],
                             "device_type":    cfg.get("device_type") or "",
+                        },
+                    )
+            except Exception:
+                pass
+
+        # ---- Detecção de fogo e fumaça (Feature #11) ----
+        if self._fire_detector and _bool(os.getenv("ENABLE_FIRE_DETECTION") or "0"):
+            try:
+                fire_alerts = self._fire_detector.process(stream_key, frame, now)
+                for fa in fire_alerts:
+                    cam_name = _sanitize(cfg.get("name") or stream_key)
+                    if fa["type"] == "fire_detected":
+                        emoji = "🔥"
+                        desc  = (
+                            f"🔥 FOGO DETECTADO • Cam: {cam_name}"
+                            f" • Área: {fa['fire_ratio']:.1%}"
+                            f" • Tremulação: {fa['flicker']:.1f}"
+                        )
+                        ev_type = "ai_fire_detected"
+                    else:
+                        emoji = "💨"
+                        desc  = (
+                            f"💨 FUMAÇA DETECTADA • Cam: {cam_name}"
+                            f" • Área: {fa['smoke_ratio']:.1%}"
+                        )
+                        ev_type = "ai_smoke_detected"
+
+                    if not self._cooldown_ok(device_id, channel, ev_type, now):
+                        continue
+
+                    snap = self._snapshot_b64(frame, stream_key)
+
+                    # Grava clip de evidência se gravador ativo
+                    if self._clip_recorder:
+                        try:
+                            self._clip_recorder.save_clip(stream_key, device_id, channel, label=ev_type)
+                        except Exception:
+                            pass
+
+                    self._push_event(
+                        token, device_id, channel, ev_type, "critical", desc,
+                        snapshot_jpg_b64=snap,
+                        extra={
+                            "fire_ratio":  fa["fire_ratio"],
+                            "smoke_ratio": fa["smoke_ratio"],
+                            "flicker":     fa["flicker"],
+                            "tags":        tags + [ev_type],
+                            "device_type": cfg.get("device_type") or "",
+                        },
+                    )
+            except Exception:
+                pass
+
+        # ---- Detecção de sabotagem de câmera (Feature #12) ----
+        if self._tamper_detector and _bool(os.getenv("ENABLE_TAMPER_DETECTION") or "0"):
+            try:
+                tamper_alerts = self._tamper_detector.process(stream_key, frame, now)
+                for ta in tamper_alerts:
+                    cam_name = _sanitize(cfg.get("name") or stream_key)
+                    reason   = ta.get("reason") or "desconhecido"
+                    desc = (
+                        f"🚫 CÂMERA SABOTADA • Cam: {cam_name}"
+                        f" • Motivo: {reason}"
+                        f" • Correlação: {ta.get('hist_corr', 0):.2f}"
+                    )
+                    if not self._cooldown_ok(device_id, channel, "ai_camera_tampered", now):
+                        continue
+
+                    snap = self._snapshot_b64(frame, stream_key)
+
+                    if self._clip_recorder:
+                        try:
+                            self._clip_recorder.save_clip(stream_key, device_id, channel, label="tamper")
+                        except Exception:
+                            pass
+
+                    self._push_event(
+                        token, device_id, channel, "ai_camera_tampered", "critical", desc,
+                        snapshot_jpg_b64=snap,
+                        extra={
+                            "tamper_reason":    reason,
+                            "hist_corr":        ta.get("hist_corr", 0),
+                            "frame_std":        ta.get("frame_std", 0),
+                            "edge_density":     ta.get("edge_density", 0),
+                            "tags":             tags + ["ai_tamper"],
+                            "device_type":      cfg.get("device_type") or "",
                         },
                     )
             except Exception:

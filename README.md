@@ -115,6 +115,23 @@ EDGE_FORWARD_SUPPRESS_EVENT_TYPES=edge_heartbeat,gateway_heartbeat
 | `AI_PLATE_WHITELIST` | — | Placas permitidas (CSV) |
 | `AI_PLATE_BLACKLIST` | — | Placas bloqueadas (CSV) |
 | `PROCESSOR_SUPPRESS_EVENT_TYPES` | — | Tipos de evento silenciados no processor |
+| `ENABLE_FIRE_DETECTION` | `0` | `1` ativa detecção de fogo e fumaça (F11) |
+| `AI_FIRE_AREA_THRESHOLD` | `0.012` | Fração mínima do frame com cor de fogo (1.2%) |
+| `AI_FIRE_CONFIRM_FRAMES` | `4` | Frames consecutivos para confirmar fogo |
+| `AI_FIRE_ALERT_INTERVAL` | `120` | Intervalo mínimo entre alertas de fogo (s) |
+| `ENABLE_TAMPER_DETECTION` | `0` | `1` ativa detecção de câmera sabotada (F12) |
+| `AI_TAMPER_BASELINE_FRAMES` | `60` | Frames para aprender perfil normal da câmera |
+| `AI_TAMPER_CONFIRM_FRAMES` | `8` | Frames consecutivos para confirmar sabotagem |
+| `AI_TAMPER_ALERT_INTERVAL` | `180` | Intervalo mínimo entre alertas de sabotagem (s) |
+| `ENABLE_CLIP_RECORDING` | `0` | `1` grava clips MP4 de 12s antes de cada alerta |
+| `CLIP_PRE_EVENT_SECONDS` | `12` | Segundos de buffer pré-alerta gravados |
+| `CLIP_FPS` | `6` | FPS do clip gravado |
+| `CLIP_MAX_AGE_HOURS` | `48` | Horas até clips antigos serem deletados |
+| `CLIP_MAX_PER_CAMERA` | `20` | Máximo de clips armazenados por câmera |
+| `ENABLE_DAILY_REPORT` | `0` | `1` envia relatório diário via Telegram às 23h |
+| `REPORT_SEND_HOUR` | `23` | Hora do envio do relatório diário (0-23) |
+| `QUEUE_MAX_AGE_HOURS` | `24` | Horas até eventos offline expirados serem descartados |
+| `QUEUE_MAX_SIZE` | `500` | Máximo de eventos na fila offline |
 
 ---
 
@@ -134,6 +151,10 @@ Todas as features são opcionais e ativadas individualmente no `.env`. Requerem 
 | F8 | **Detecção de Permanência Prolongada** (loitering) | `workers/loitering_detector.py` | `ENABLE_AI_ANALYTICS=1` |
 | F9 | **Mapa de Calor de Movimentação** | `workers/heatmap_generator.py` | `ENABLE_AI_ANALYTICS=1` |
 | F10 | **Detecção de Queda de Pessoa** | `workers/fall_detector.py` | `ENABLE_AI_ANALYTICS=1` |
+| F11 | **Detecção de Fogo e Fumaça** | `workers/fire_smoke_detector.py` | `ENABLE_FIRE_DETECTION=1` |
+| F12 | **Detecção de Câmera Sabotada** (coberta/virada) | `workers/tamper_detector.py` | `ENABLE_TAMPER_DETECTION=1` |
+| — | **Clips de Vídeo nos Alertas** (buffer 15s pré-evento) | `workers/clip_recorder.py` | `ENABLE_CLIP_RECORDING=1` |
+| — | **Relatório Diário Automático** (Telegram + HTML) | `workers/report_generator.py` | `ENABLE_DAILY_REPORT=1` |
 
 ### Detalhes das features
 
@@ -182,6 +203,14 @@ O EXE gerado tem **~88 MB** (otimizado — era 292 MB antes).
 ---
 
 ## Changelog
+
+### [não commitado] — 2026-06-02
+
+- **feat (F11):** Detecção de Fogo e Fumaça (`workers/fire_smoke_detector.py`) — análise HSV + variância temporal, sem modelo extra. Ativar: `ENABLE_FIRE_DETECTION=1`.
+- **feat (F12):** Detecção de Câmera Sabotada (`workers/tamper_detector.py`) — detecta câmera coberta, virada ou desfocada por histograma e bordas. Ativar: `ENABLE_TAMPER_DETECTION=1`.
+- **feat:** Gravador de Clips MP4 (`workers/clip_recorder.py`) — buffer circular de 12s por câmera, grava evidência antes de cada alerta. Ativar: `ENABLE_CLIP_RECORDING=1`.
+- **feat:** Relatório Diário Automático (`workers/report_generator.py`) — enviado via Telegram às 23h e salvo como HTML em `.reports/`. Ativar: `ENABLE_DAILY_REPORT=1`.
+- **fix (agent_api.py):** `_flush_once` não enviava `x-collector-key` ao reenviar fila offline — Railway rejeitava todos silenciosamente. Corrigido. Adicionados TTL e tamanho máximo da fila (`QUEUE_MAX_AGE_HOURS`, `QUEUE_MAX_SIZE`).
 
 ### [não commitado] — 2026-05-31
 

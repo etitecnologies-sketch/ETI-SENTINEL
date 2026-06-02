@@ -19,6 +19,7 @@ from edge_notify import send_telegram, send_telegram_photo, send_whatsapp_twilio
 from edge_rules import RuleEngine, build_message
 from workers.risk_scorer import RiskScorer
 from workers.narrative_reporter import NarrativeReporter
+from workers.report_generator import ReportGenerator
 
 
 def _sanitize_base_url(url: str) -> str:
@@ -114,14 +115,22 @@ class PushRelay:
         self._recent_events: list = []
         self._risk = RiskScorer()
         self._narrator = NarrativeReporter(env)
+        self._reporter = ReportGenerator(
+            env,
+            get_telegram_cfg=lambda: dict(self._client_notify),
+            get_recent_events=lambda limit: self.events_recent(limit),
+            get_risk_snapshot=lambda: self._risk.snapshot(),
+        )
 
     def start(self) -> None:
         threading.Thread(target=self._loop_refresh, daemon=True).start()
         threading.Thread(target=self._loop_flush, daemon=True).start()
         threading.Thread(target=self._loop_state, daemon=True).start()
+        self._reporter.start()
 
     def stop(self) -> None:
         self._stop = True
+        self._reporter.stop()
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
@@ -779,28 +788,49 @@ class PushRelay:
         if not items:
             return
         url = self._ingest_url()
+        key = self._collector_key()
         if not url:
             return
         cid = self._client_id()
+
+        # Descarta eventos mais velhos que QUEUE_MAX_AGE_HOURS (padrão: 24h)
+        try:
+            max_age_s = float(self._env.get("QUEUE_MAX_AGE_HOURS") or 24) * 3600
+        except Exception:
+            max_age_s = 86400.0
+        now = time.time()
+        items = [it for it in items if isinstance(it, dict) and (now - float(it.get("ts") or 0)) < max_age_s]
+
+        # Limita tamanho total da fila (mantém os mais recentes)
+        try:
+            max_queue = int(self._env.get("QUEUE_MAX_SIZE") or 500)
+        except Exception:
+            max_queue = 500
+        if len(items) > max_queue:
+            items = items[-max_queue:]
+
         keep = []
         for it in items:
             payload = it.get("payload") if isinstance(it, dict) else None
             src = it.get("source") if isinstance(it, dict) else ""
             if not isinstance(payload, dict):
                 continue
-            
+
             # GARANTIA MULTITENANT NO FLUSH
             if cid:
                 try:
                     payload["client_id"] = int(cid)
-                except:
+                except Exception:
                     pass
 
             try:
                 r = self._sess.post(
                     url + "/push",
                     json=payload,
-                    headers={"x-event-source": sanitize(src or "edge")},
+                    headers={
+                        "x-event-source":  sanitize(src or "edge"),
+                        "x-collector-key": key,   # corrigido: era omitido, Railway rejeitava
+                    },
                     timeout=(5, 12),
                 )
                 if r.status_code == 200:
