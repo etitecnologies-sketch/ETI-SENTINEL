@@ -69,6 +69,7 @@ ETI_SENTINEL_CLIENT_READY/*.exe
 ETI_SENTINEL_CLIENT_READY/bin/*.exe
 ETI_SENTINEL_CLIENT_READY/bin/*.yml
 ETI_SENTINEL_CLIENT_READY/bin/LICENSE
+ETI_SENTINEL_CLIENT_READY/bin/onnx_classes.json
 
 # Modelos de IA (grandes demais para o repositório)
 *.onnx

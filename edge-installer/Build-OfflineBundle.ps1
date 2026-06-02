@@ -21,9 +21,9 @@ $DEP = @{
 # Hashes SHA256 conhecidos — atualize a cada nova versão das dependências.
 # Para obter o hash: (Get-FileHash <arquivo> -Algorithm SHA256).Hash
 $KNOWN_HASHES = @{
-    "winsw"    = "SHA256_DO_WINSW_2.12.0"
-    "python"   = "SHA256_DO_PYTHON_3.12.10"
-    "mediamtx" = "SHA256_DO_MEDIAMTX_1.9.0"
+    "winsw"    = "05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA"
+    "python"   = "67B5635E80EA51072B87941312D00EC8927C4DB9BA18938F7AD2D27B328B95FB"
+    "mediamtx" = "2279B921B2BFB69321A142090DB0AC88A36AB2093AFBB9F5A59ECA94BE0C03FA"
     # ffmpeg: hash não disponível publicamente — verificação pulada, mas registrada no manifest
 }
 
