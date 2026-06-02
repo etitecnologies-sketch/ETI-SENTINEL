@@ -207,7 +207,8 @@ function Ensure-WinSW {
     }
 }
 
-function Write-ServiceConfig([string]$xmlPath, [string]$id, [string]$name, [string]$description, [string]$exe, [string]$args, [string]$workDir, [hashtable]$envMap, [string[]]$depends) {
+# $svcArgs evita colisão com $args (variável automática do PowerShell que captura params extras)
+function Write-ServiceConfig([string]$xmlPath, [string]$id, [string]$name, [string]$description, [string]$exe, [string]$svcArgs, [string]$workDir, [hashtable]$envMap, [string[]]$depends) {
     $logDir = Join-Path $installDir ".logs"
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     $envLines = ""
@@ -226,7 +227,7 @@ function Write-ServiceConfig([string]$xmlPath, [string]$id, [string]$name, [stri
         }
     }
     $exeEsc = [Security.SecurityElement]::Escape($exe)
-    $argsEsc = [Security.SecurityElement]::Escape($args)
+    $argsEsc = [Security.SecurityElement]::Escape($svcArgs)
     $workEsc = [Security.SecurityElement]::Escape($workDir)
     $idEsc = [Security.SecurityElement]::Escape($id)
     $nameEsc = [Security.SecurityElement]::Escape($name)
@@ -356,38 +357,9 @@ function Ensure-Python {
         return
     }
 
-    if (Ensure-Command "python") {
-        $cmd = (Get-Command python -ErrorAction SilentlyContinue)
-        $src = ""
-        try { $src = $cmd.Source } catch {}
-        if ($src -and !(Is-WindowsAppsAlias $src)) {
-            $script:PythonExe = $src
-            return
-        }
-    }
-
-    try {
-        $cands = @()
-        try { $cands = (& where.exe python 2>$null) } catch {}
-        foreach ($c in ($cands | Where-Object { $_ })) {
-            $p = ("" + $c).Trim()
-            if ($p -and (Test-Path $p) -and !(Is-WindowsAppsAlias $p)) {
-                $script:PythonExe = $p
-                return
-            }
-        }
-    } catch {}
-
-    if (Ensure-Command "winget") {
-        Write-Inf "Instalando Python via winget..."
-        & winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements | Out-Null
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-        if (!(Ensure-Command "python")) { throw "Falha ao instalar Python via winget." }
-        $script:PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
-        return
-    }
-
-    Write-Inf "Python não encontrado. Baixando instalador oficial..."
+    # Python do sistema NÃO é usado — versões desconhecidas (ex: 3.14) causam falhas
+    # como serviço Windows. Sempre baixa Python 3.12 para a pasta dedicada.
+    Write-Inf "Python não encontrado na pasta dedicada. Baixando Python $($DEP.PythonVersion)..."
     $pyDir = Join-Path $installDir "python"
     $tmp = Join-Path $env:TEMP ("python-installer-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
