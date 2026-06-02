@@ -2305,6 +2305,68 @@ app.delete("/triggers/:id", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Automation Rules (admin JWT) ──────────────────────────────────────────────
+app.get("/automation-rules", auth, async (req, res) => {
+  try {
+    const cid = clientFilter(req);
+    let q = "SELECT id, name, enabled, rule, client_id, created_at, updated_at FROM automation_rules";
+    const params = [];
+    if (cid) { q += " WHERE client_id=$1"; params.push(cid); }
+    q += " ORDER BY id ASC";
+    const r = await pool.query(q, params);
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/automation-rules", auth, async (req, res) => {
+  try {
+    const { name, enabled = true, rule, client_id } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: "name required" });
+    if (!rule || typeof rule !== "object" || Array.isArray(rule)) return res.status(400).json({ error: "rule must be an object" });
+    if (!Array.isArray(rule.if_all) || rule.if_all.length === 0) return res.status(400).json({ error: "rule.if_all required" });
+    const cid = req.user.role === "superadmin" ? (client_id || req.user.client_id) : req.user.client_id;
+    const r = await pool.query(
+      "INSERT INTO automation_rules (name, enabled, client_id, rule, created_at, updated_at) VALUES ($1,$2,$3,$4::jsonb,NOW(),NOW()) RETURNING id",
+      [name.trim(), enabled !== false, cid, JSON.stringify(rule)]
+    );
+    res.status(201).json({ id: r.rows[0].id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put("/automation-rules/:id", auth, async (req, res) => {
+  try {
+    const { name, enabled, rule } = req.body;
+    const id = parseInt(req.params.id);
+    const cid = req.user.role !== "superadmin" ? req.user.client_id : null;
+    const params = [name, enabled !== false, JSON.stringify(rule), id];
+    let q = "UPDATE automation_rules SET name=$1, enabled=$2, rule=$3::jsonb, updated_at=NOW() WHERE id=$4";
+    if (cid) { q += " AND client_id=$5"; params.push(cid); }
+    await pool.query(q, params);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/automation-rules/:id", auth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const cid = req.user.role !== "superadmin" ? req.user.client_id : null;
+    if (cid) {
+      await pool.query("DELETE FROM automation_rules WHERE id=$1 AND client_id=$2", [id, cid]);
+    } else {
+      await pool.query("DELETE FROM automation_rules WHERE id=$1", [id]);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/alerts", auth, async (req, res) => {
   const cid = clientFilter(req);
   let query = `

@@ -14,6 +14,7 @@ import {
   Camera,
   Activity,
   LayoutGrid,
+  Workflow,
 } from 'lucide-react';
 import VideoPlayer from './components/VideoPlayer';
 import VideoGrid from './components/VideoGrid';
@@ -2556,6 +2557,327 @@ function AlertsPage({ userRole }) {
   );
 }
 
+// ── Automation Page ───────────────────────────────────────────
+const EVENT_SUGGESTIONS = [
+  "video_loss","video_recovery","device_offline","device_online",
+  "ai_person_detected","ai_fall_detected","ai_zone_intrusion","ai_line_crossing",
+  "ai_crowd_alert","ai_loitering","ai_abandoned_object","ai_people_enter","ai_people_exit",
+  "heartbeat_timeout",
+];
+
+function emptyCondition() { return { event_type: "", device_id: "", channel: "", severity: "" }; }
+function emptyForm() {
+  return {
+    name: "", enabled: true, client_id: "",
+    rule: {
+      within_seconds: 30, cooldown_seconds: 300,
+      if_all: [emptyCondition()], if_not: [], actions: ["notify"], message: "",
+    },
+  };
+}
+
+function ConditionRow({ cond, onChange, onRemove, canRemove }) {
+  const inp = (field, val) => onChange({ ...cond, [field]: val });
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
+      <input
+        list="evt-suggestions" placeholder="event_type *" value={cond.event_type}
+        onChange={(e) => inp("event_type", e.target.value)}
+        style={{ ...S.input, flex: "1 1 160px", minWidth: 140, fontSize: 12, padding: "6px 10px" }}
+      />
+      <datalist id="evt-suggestions">{EVENT_SUGGESTIONS.map((e) => <option key={e} value={e} />)}</datalist>
+      <input placeholder="device_id" type="number" value={cond.device_id}
+        onChange={(e) => inp("device_id", e.target.value)}
+        style={{ ...S.input, width: 90, fontSize: 12, padding: "6px 8px" }} />
+      <input placeholder="canal" type="number" value={cond.channel}
+        onChange={(e) => inp("channel", e.target.value)}
+        style={{ ...S.input, width: 70, fontSize: 12, padding: "6px 8px" }} />
+      <select value={cond.severity} onChange={(e) => inp("severity", e.target.value)}
+        style={{ ...S.select, width: 90, fontSize: 12, padding: "6px 8px" }}>
+        <option value="">qualquer</option>
+        <option value="info">info</option>
+        <option value="warn">warn</option>
+        <option value="critical">critical</option>
+      </select>
+      {canRemove && (
+        <button type="button" onClick={onRemove}
+          style={{ ...S.btnSm("danger"), padding: "4px 8px", fontSize: 14, lineHeight: 1 }}>✕</button>
+      )}
+    </div>
+  );
+}
+
+function AutomationPage({ userRole, userClientId }) {
+  const [rules, setRules] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(emptyForm());
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    api("/automation-rules").then((d) => setRules(Array.isArray(d) ? d : [])).catch(() => {});
+    if (userRole === "superadmin") {
+      api("/clients").then((d) => setClients(Array.isArray(d) ? d : [])).catch(() => {});
+    }
+  }, [userRole]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setRule = (patch) => setForm((f) => ({ ...f, rule: { ...f.rule, ...patch } }));
+
+  const updateCond = (list, idx, val) => list.map((c, i) => i === idx ? val : c);
+  const addCond = (list) => [...list, emptyCondition()];
+  const removeCond = (list, idx) => list.filter((_, i) => i !== idx);
+
+  const openNew = () => { setForm(emptyForm()); setModal({}); };
+  const openEdit = (r) => {
+    setForm({
+      name: r.name, enabled: r.enabled, client_id: r.client_id || "",
+      rule: {
+        within_seconds: r.rule?.within_seconds ?? 30,
+        cooldown_seconds: r.rule?.cooldown_seconds ?? 300,
+        if_all: r.rule?.if_all?.length ? r.rule.if_all.map((c) => ({
+          event_type: c.event_type || "", device_id: c.device_id ?? "", channel: c.channel ?? "", severity: c.severity || "",
+        })) : [emptyCondition()],
+        if_not: (r.rule?.if_not || []).map((c) => ({
+          event_type: c.event_type || "", device_id: c.device_id ?? "", channel: c.channel ?? "", severity: c.severity || "",
+        })),
+        actions: r.rule?.actions || ["notify"],
+        message: r.rule?.message || "",
+      },
+    });
+    setModal(r);
+  };
+
+  const normConds = (list) => list
+    .filter((c) => c.event_type.trim())
+    .map((c) => {
+      const out = { event_type: c.event_type.trim() };
+      if (c.device_id !== "" && c.device_id !== null) out.device_id = parseInt(c.device_id);
+      if (c.channel !== "" && c.channel !== null) out.channel = parseInt(c.channel);
+      if (c.severity) out.severity = c.severity;
+      return out;
+    });
+
+  const save = async () => {
+    const ifAll = normConds(form.rule.if_all);
+    if (!form.name.trim()) return alert("Nome obrigatório.");
+    if (ifAll.length === 0) return alert("Adicione ao menos uma condição SE.");
+    setSaving(true);
+    try {
+      const body = {
+        name: form.name.trim(),
+        enabled: form.enabled,
+        client_id: form.client_id ? parseInt(form.client_id) : (userClientId || null),
+        rule: {
+          within_seconds: Number(form.rule.within_seconds) || 30,
+          cooldown_seconds: Number(form.rule.cooldown_seconds) || 300,
+          if_all: ifAll,
+          if_not: normConds(form.rule.if_not),
+          actions: ["notify"],
+          message: form.rule.message.trim(),
+        },
+      };
+      if (modal?.id) {
+        await api(`/automation-rules/${modal.id}`, { method: "PUT", body: JSON.stringify(body) });
+      } else {
+        await api("/automation-rules", { method: "POST", body: JSON.stringify(body) });
+      }
+      setModal(null);
+      load();
+    } catch (e) {
+      alert("Erro ao salvar: " + (e?.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const del = async (id) => {
+    if (!confirm("Remover esta regra?")) return;
+    await api(`/automation-rules/${id}`, { method: "DELETE" });
+    load();
+  };
+
+  const toggle = async (r) => {
+    await api(`/automation-rules/${r.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name: r.name, enabled: !r.enabled, rule: r.rule }),
+    });
+    load();
+  };
+
+  const condSummary = (rule) => {
+    const parts = (rule?.if_all || []).map((c) => {
+      let s = c.event_type || "?";
+      if (c.device_id) s += ` dev=${c.device_id}`;
+      if (c.channel !== undefined && c.channel !== "") s += ` ch=${c.channel}`;
+      return s;
+    });
+    return parts.join(" + ") || "—";
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+        <div>
+          <div style={S.pageTitle}>⚙️ Automação</div>
+          <div style={S.pageSub}>Regras de automação — {rules.length} configurada(s)</div>
+        </div>
+        <button style={S.btn("primary")} onClick={openNew}>+ Nova Regra</button>
+      </div>
+
+      <div style={{ ...S.card, overflowX: "auto", padding: 0 }}>
+        <table style={{ ...S.table, margin: 0, borderSpacing: 0 }}>
+          <thead>
+            <tr>
+              {["Status","Nome","Condições SE","Janela","Cooldown", userRole === "superadmin" ? "Cliente" : null,"Ações"]
+                .filter(Boolean).map((h) => <th key={h} style={{ ...S.th, padding: "14px 16px" }}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rules.length === 0 && (
+              <tr><td colSpan={7} style={{ ...S.td, textAlign: "center", color: "#3a5070", padding: 40 }}>
+                Nenhuma regra configurada — clique em "+ Nova Regra" para começar
+              </td></tr>
+            )}
+            {rules.map((r, i) => (
+              <tr key={r.id} style={{ background: i % 2 === 0 ? "transparent" : "rgba(11,21,37,0.35)" }}>
+                <td style={{ ...S.td, border: "none", padding: "14px 16px" }}>
+                  <span style={S.badge(r.enabled ? "#22c55e" : "#4a6080")}>{r.enabled ? "● ativo" : "○ inativo"}</span>
+                </td>
+                <td style={{ ...S.td, border: "none", fontWeight: 700, color: "#f1f5f9", fontSize: 14 }}>{r.name}</td>
+                <td style={{ ...S.td, border: "none", color: "#94a3b8", fontSize: 12, maxWidth: 260 }}>
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {condSummary(r.rule)}
+                  </span>
+                </td>
+                <td style={{ ...S.td, border: "none", color: "#cbd5e1", textAlign: "center" }}>
+                  {r.rule?.within_seconds ?? "—"}s
+                </td>
+                <td style={{ ...S.td, border: "none", color: "#cbd5e1", textAlign: "center" }}>
+                  {r.rule?.cooldown_seconds ?? "—"}s
+                </td>
+                {userRole === "superadmin" && (
+                  <td style={{ ...S.td, border: "none" }}>
+                    <span style={{ fontSize: 11, color: "#3b9eff", fontWeight: 700 }}>
+                      {clients.find((c) => c.id === r.client_id)?.name || `#${r.client_id || "—"}`}
+                    </span>
+                  </td>
+                )}
+                <td style={{ ...S.td, border: "none" }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={S.btnSm(r.enabled ? "ghost" : "primary")} onClick={() => toggle(r)}>{r.enabled ? "⏸" : "▶️"}</button>
+                    <button style={S.btnSm()} onClick={() => openEdit(r)}>✏️</button>
+                    <button style={S.btnSm("danger")} onClick={() => del(r.id)}>🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {modal !== null && (
+        <div style={S.modal} onClick={() => setModal(null)}>
+          <div style={{ ...S.modalBox, width: 560, maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.modalTitle}>{modal?.id ? "✏️ Editar Regra" : "➕ Nova Regra de Automação"}</div>
+
+            {/* Nome e status */}
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 14 }}>
+              <div style={{ ...S.fg, flex: 1 }}>
+                <label style={S.label}>Nome da regra *</label>
+                <input style={S.input} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ex: Câmera perdida + pessoa detectada" />
+              </div>
+              <div style={{ ...S.fg, flexShrink: 0 }}>
+                <label style={S.label}>Status</label>
+                <select style={S.select} value={form.enabled ? "1" : "0"} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.value === "1" }))}>
+                  <option value="1">● Ativo</option>
+                  <option value="0">○ Inativo</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Janela e cooldown */}
+            <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+              <div style={{ ...S.fg, flex: 1 }}>
+                <label style={S.label}>Janela de tempo (segundos)</label>
+                <input style={S.input} type="number" min={1} value={form.rule.within_seconds}
+                  onChange={(e) => setRule({ within_seconds: e.target.value })} />
+                <div style={{ fontSize: 10, color: "#3a5a80", marginTop: 3 }}>Eventos devem ocorrer dentro deste intervalo</div>
+              </div>
+              <div style={{ ...S.fg, flex: 1 }}>
+                <label style={S.label}>Cooldown (segundos)</label>
+                <input style={S.input} type="number" min={1} value={form.rule.cooldown_seconds}
+                  onChange={(e) => setRule({ cooldown_seconds: e.target.value })} />
+                <div style={{ fontSize: 10, color: "#3a5a80", marginTop: 3 }}>Intervalo mínimo entre ativações</div>
+              </div>
+            </div>
+
+            {/* Condições SE */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={{ ...S.label, marginBottom: 0 }}>SE todos ocorrerem *</label>
+                <button type="button" style={S.btnSm("primary")} onClick={() => setRule({ if_all: addCond(form.rule.if_all) })}>+ Condição</button>
+              </div>
+              {form.rule.if_all.map((c, i) => (
+                <ConditionRow key={i} cond={c}
+                  onChange={(v) => setRule({ if_all: updateCond(form.rule.if_all, i, v) })}
+                  onRemove={() => setRule({ if_all: removeCond(form.rule.if_all, i) })}
+                  canRemove={form.rule.if_all.length > 1} />
+              ))}
+            </div>
+
+            {/* Condições SE NÃO */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={{ ...S.label, marginBottom: 0, color: "#94a3b8" }}>MAS NÃO (opcional)</label>
+                <button type="button" style={S.btnSm("ghost")} onClick={() => setRule({ if_not: addCond(form.rule.if_not) })}>+ Exceção</button>
+              </div>
+              {form.rule.if_not.length === 0 && (
+                <div style={{ fontSize: 11, color: "#3a5070", fontStyle: "italic" }}>Nenhuma exceção — a regra dispara sempre que as condições acima forem atendidas</div>
+              )}
+              {form.rule.if_not.map((c, i) => (
+                <ConditionRow key={i} cond={c}
+                  onChange={(v) => setRule({ if_not: updateCond(form.rule.if_not, i, v) })}
+                  onRemove={() => setRule({ if_not: removeCond(form.rule.if_not, i) })}
+                  canRemove={true} />
+              ))}
+            </div>
+
+            {/* Mensagem */}
+            <div style={{ ...S.fg, marginBottom: 14 }}>
+              <label style={S.label}>Mensagem (opcional)</label>
+              <textarea style={{ ...S.input, height: 60, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+                value={form.rule.message}
+                onChange={(e) => setRule({ message: e.target.value })}
+                placeholder="Ex: ⚠️ Cam {e0.device_id} perdida e pessoa detectada" />
+              <div style={{ fontSize: 10, color: "#3a5a80", marginTop: 3 }}>
+                Variáveis: {"{e0.event_type}"} {"{e0.device_id}"} {"{e0.channel}"} {"{e0.severity}"}
+              </div>
+            </div>
+
+            {/* Cliente (superadmin) */}
+            {userRole === "superadmin" && (
+              <div style={{ ...S.fg, marginBottom: 14 }}>
+                <label style={S.label}>Cliente</label>
+                <select style={S.select} value={form.client_id} onChange={(e) => setForm((f) => ({ ...f, client_id: e.target.value }))}>
+                  <option value="">— selecione —</option>
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
+              <button style={S.btn("ghost")} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={S.btn("primary")} onClick={save} disabled={saving}>{saving ? "Salvando..." : "Salvar Regra"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Triggers Page ─────────────────────────────────────────────
 function TriggersPage({ userRole }) {
   const [triggers, setTriggers] = useState([]);
@@ -3091,6 +3413,7 @@ function NexusApp() {
         "cameras",
         "scanner",
         "triggers",
+        "automation",
         "alerts",
         "events",
         "solar",
@@ -3194,6 +3517,7 @@ function NexusApp() {
     { id: "cameras", label: "Câmeras", icon: Camera },
     { id: "scanner", label: "Scanner", icon: RefreshCw },
     { id: "triggers", label: "Triggers", icon: Zap },
+    { id: "automation", label: "Automação", icon: Workflow },
     { id: "alerts", label: "Alertas", icon: Bell },
     { id: "events", label: "Eventos", icon: ClipboardList },
     { id: "solar", label: "Solar", icon: Sun },
@@ -3207,6 +3531,7 @@ function NexusApp() {
     { id: "devices", label: "Devices", icon: Server },
     { id: "cameras", label: "Câmeras", icon: Camera },
     { id: "scanner", label: "Scanner", icon: RefreshCw },
+    { id: "automation", label: "Automação", icon: Workflow },
     { id: "alerts", label: "Alertas", icon: Bell },
     { id: "events", label: "Eventos", icon: ClipboardList },
     { id: "solar", label: "Solar", icon: Sun },
@@ -3223,6 +3548,7 @@ function NexusApp() {
     cameras:   <VideoGrid />,
     scanner:   <ScannerPage userRole={userRole} userClientId={userClientId} canVideo={canVideo} canRecord={canRecord} />,
     triggers:  <TriggersPage userRole={userRole} />,
+    automation: <AutomationPage userRole={userRole} userClientId={userClientId} />,
     alerts:    <AlertsPage userRole={userRole} />,
     events:    <EventsPage userRole={userRole} />,
     solar: <SolarPage userRole={userRole} />,
