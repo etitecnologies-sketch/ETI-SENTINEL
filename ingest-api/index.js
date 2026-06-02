@@ -20,15 +20,16 @@ function sanitizeCorsValue(v) {
   return s.replace(/["'`\s]/g, "");
 }
 
-const corsOriginRawEarly = process.env.CORS_ORIGIN || "*";
-const corsOriginEarly = corsOriginRawEarly
-  .split(",")
-  .map((s) => sanitizeCorsValue(s))
-  .filter(Boolean);
+const corsOriginRawEarly = (process.env.CORS_ORIGIN || "*").trim();
+// Quando "*", passa string diretamente — array ["*"] é tratado como origem literal pelo cors do Express
+const corsOriginEarly = corsOriginRawEarly === "*"
+  ? "*"
+  : corsOriginRawEarly.split(",").map((s) => sanitizeCorsValue(s)).filter(Boolean);
 
 const corsOptionsEarly = {
-  origin: corsOriginEarly.length === 0 ? "*" : corsOriginEarly,
-  credentials: corsOriginEarly.length > 0 && !(corsOriginEarly.length === 1 && corsOriginEarly[0] === "*"),
+  origin: corsOriginEarly,
+  // credentials: true só é válido com origens específicas (não com "*")
+  credentials: Array.isArray(corsOriginEarly) && corsOriginEarly.length > 0,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-device-token", "x-collector-key", "x-event-source"],
   optionsSuccessStatus: 204,
