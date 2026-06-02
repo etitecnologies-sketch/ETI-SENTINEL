@@ -332,9 +332,9 @@ class PushRelay:
         if et in {"videoloss_started", "videoloss_stopped"} and isinstance(did, int) and did > 0:
             now = time.time()
             try:
-                dedupe_seconds = float(self.env.get("EDGE_EVENT_DEDUPE_SECONDS") or 60)
+                dedupe_seconds = float(self.env.get("EDGE_EVENT_DEDUPE_SECONDS") or 600)
             except Exception:
-                dedupe_seconds = 60.0
+                dedupe_seconds = 600.0
             try:
                 min_videoloss_seconds = float(self.env.get("EDGE_VIDEOLOSS_MIN_SECONDS") or 30)
             except Exception:
