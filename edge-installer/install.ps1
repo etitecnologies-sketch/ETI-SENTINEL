@@ -2,7 +2,7 @@ param([string]$Version = "v2.1")
 
 # Substitua pelo hash SHA256 real do Setup-ETI-SENTINEL-Edge.ps1 de cada release.
 # Para obter: (Get-FileHash .\Setup-ETI-SENTINEL-Edge.ps1 -Algorithm SHA256).Hash
-$EXPECTED_SHA256 = "FAEA4F51EC50DB8E64971C0EE7B197BA86F2DC13C7086DD6AAC01DC315D55679"
+$EXPECTED_SHA256 = "F03006EA0CBAA4FA03B04050CCFE2E38FE2727CCF2C25EB083256CE944D3D182"
 $url = "https://github.com/etitecnologies-sketch/ETI-SENTINEL/releases/download/$Version/Setup-ETI-SENTINEL-Edge.ps1"
 $tmp = Join-Path $env:TEMP "Setup-ETI-SENTINEL-Edge.ps1"
 
