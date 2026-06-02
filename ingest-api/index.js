@@ -585,6 +585,23 @@ async function initDB() {
       );
     `).catch(e => console.log("Solar Tables Error:", e.message));
 
+    // OTA e feature flags por cliente
+    await pool.query(`
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS features JSONB DEFAULT '{}';
+      CREATE TABLE IF NOT EXISTS ota_manifests (
+        id           SERIAL PRIMARY KEY,
+        version      VARCHAR(32)  NOT NULL,
+        download_url TEXT         NOT NULL,
+        sha256       VARCHAR(64)  NOT NULL,
+        notes        TEXT         DEFAULT '',
+        required     BOOLEAN      DEFAULT false,
+        active       BOOLEAN      DEFAULT true,
+        created_at   TIMESTAMP    DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ota_manifests_active
+        ON ota_manifests (active, created_at DESC);
+    `).catch(e => console.log("OTA Tables Error:", e.message));
+
     console.log("Database Professional Restore: OK");
   } catch (e) { console.error("DB Restore Error:", e.message); }
 }
