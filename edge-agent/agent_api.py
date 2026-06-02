@@ -20,6 +20,7 @@ from edge_rules import RuleEngine, build_message
 from workers.risk_scorer import RiskScorer
 from workers.narrative_reporter import NarrativeReporter
 from workers.report_generator import ReportGenerator
+from workers.ota_updater import OTAUpdater
 
 
 def _sanitize_base_url(url: str) -> str:
@@ -121,16 +122,19 @@ class PushRelay:
             get_recent_events=lambda limit: self.events_recent(limit),
             get_risk_snapshot=lambda: self._risk.snapshot(),
         )
+        self._ota = OTAUpdater(env)
 
     def start(self) -> None:
         threading.Thread(target=self._loop_refresh, daemon=True).start()
         threading.Thread(target=self._loop_flush, daemon=True).start()
         threading.Thread(target=self._loop_state, daemon=True).start()
         self._reporter.start()
+        self._ota.start()
 
     def stop(self) -> None:
         self._stop = True
         self._reporter.stop()
+        self._ota.stop()
 
     def status(self) -> Dict[str, Any]:
         with self._lock:

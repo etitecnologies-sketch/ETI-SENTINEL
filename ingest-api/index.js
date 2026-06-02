@@ -2848,6 +2848,139 @@ async function cloudMonitor(deviceId = null) {
 // O CloudMonitor foi desativado aqui pois o Processor (Python) já faz essa checagem de forma mais eficiente e com alertas centralizados.
 // setInterval(cloudMonitor, 60000);
 
+// ── OTA e Feature Flags ─────────────────────────────────────────────────────
+
+// GET /collector/update-check — edge agent verifica nova versão
+app.get("/collector/update-check", async (req, res) => {
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+
+  const clientVersion = sanitize(req.query.version || "").trim();
+
+  try {
+    const r = await pool.query(
+      "SELECT version, download_url, sha256, notes, required FROM ota_manifests WHERE active=true ORDER BY created_at DESC LIMIT 1"
+    );
+    if (!r.rows.length) return res.json({ up_to_date: true });
+
+    const m = r.rows[0];
+    if (m.version === clientVersion) return res.json({ up_to_date: true });
+
+    res.json({
+      version:      m.version,
+      download_url: m.download_url,
+      sha256:       m.sha256,
+      notes:        m.notes || "",
+      required:     !!m.required,
+    });
+  } catch (e) {
+    console.error("/collector/update-check error:", e.message);
+    res.status(500).json({ error: "Failed to check update" });
+  }
+});
+
+// GET /collector/features — edge agent busca feature flags do cliente
+app.get("/collector/features", async (req, res) => {
+  const authz = await authorizeCollector(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+
+  try {
+    const r = await pool.query("SELECT features FROM clients WHERE id=$1", [authz.client_id]);
+    res.json(r.rows[0]?.features || {});
+  } catch (e) {
+    console.error("/collector/features error:", e.message);
+    res.status(500).json({ error: "Failed to fetch features" });
+  }
+});
+
+// GET /admin/clients-status — visão geral de todos os clientes para o portal admin
+app.get("/admin/clients-status", auth, superadmin, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT c.id, c.name, c.status, c.plan, c.city,
+             COALESCE(c.features, '{}')::jsonb AS features,
+             COUNT(DISTINCT d.id)::int                                               AS device_count,
+             COUNT(DISTINCT CASE WHEN d.status='online'  THEN d.id END)::int        AS online_count,
+             COUNT(DISTINCT CASE WHEN d.status='offline' THEN d.id END)::int        AS offline_count,
+             MAX(d.last_seen)                                                        AS last_heartbeat
+      FROM clients c
+      LEFT JOIN devices d ON d.client_id = c.id
+      GROUP BY c.id
+      ORDER BY c.name
+    `);
+    res.json(r.rows);
+  } catch (e) {
+    console.error("/admin/clients-status error:", e.message);
+    res.status(500).json({ error: "Failed to fetch clients status" });
+  }
+});
+
+// PUT /admin/clients/:id/features — atualiza feature flags de um cliente
+app.put("/admin/clients/:id/features", auth, superadmin, async (req, res) => {
+  const cid = parseInt(req.params.id);
+  if (!cid || !Number.isFinite(cid)) return res.status(400).json({ error: "invalid id" });
+
+  const features = req.body.features;
+  if (!features || typeof features !== "object") return res.status(400).json({ error: "features object required" });
+
+  try {
+    await pool.query("UPDATE clients SET features=$1 WHERE id=$2", [JSON.stringify(features), cid]);
+    res.json({ ok: true, client_id: cid, features });
+  } catch (e) {
+    console.error("/admin/clients/:id/features error:", e.message);
+    res.status(500).json({ error: "Failed to update features" });
+  }
+});
+
+// GET /admin/ota-manifest — lista histórico de manifests OTA
+app.get("/admin/ota-manifest", auth, superadmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT * FROM ota_manifests ORDER BY created_at DESC LIMIT 20"
+    );
+    res.json(r.rows);
+  } catch (e) {
+    console.error("/admin/ota-manifest GET error:", e.message);
+    res.status(500).json({ error: "Failed to fetch OTA manifests" });
+  }
+});
+
+// PUT /admin/ota-manifest — publica nova versão (desativa antigas)
+app.put("/admin/ota-manifest", auth, superadmin, async (req, res) => {
+  const { version, download_url, sha256, notes, required } = req.body || {};
+  if (!version || !download_url || !sha256) {
+    return res.status(400).json({ error: "version, download_url e sha256 são obrigatórios" });
+  }
+  if (!/^[0-9a-f]{64}$/i.test(sha256)) {
+    return res.status(400).json({ error: "sha256 deve ter 64 caracteres hexadecimais" });
+  }
+
+  try {
+    await pool.query("UPDATE ota_manifests SET active=false");
+    const r = await pool.query(
+      `INSERT INTO ota_manifests (version, download_url, sha256, notes, required, active)
+       VALUES ($1, $2, $3, $4, $5, true) RETURNING *`,
+      [sanitize(version), sanitize(download_url), sanitize(sha256).toLowerCase(), sanitize(notes || ""), !!required]
+    );
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error("/admin/ota-manifest PUT error:", e.message);
+    res.status(500).json({ error: "Failed to publish OTA manifest" });
+  }
+});
+
+// DELETE /admin/ota-manifest/:id — desativa um manifest específico
+app.delete("/admin/ota-manifest/:id", auth, superadmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "invalid id" });
+  try {
+    await pool.query("UPDATE ota_manifests SET active=false WHERE id=$1", [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to deactivate manifest" });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 const TCP_PORT = process.env.TCP_PORT || 3002; // Porta para o Registro Automático da Intelbras (Alterada de 3001 para 3002 para evitar conflito com WebSocket)
 

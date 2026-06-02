@@ -15,6 +15,7 @@ import {
   Activity,
   LayoutGrid,
   Workflow,
+  Shield,
 } from 'lucide-react';
 import VideoPlayer from './components/VideoPlayer';
 import VideoGrid from './components/VideoGrid';
@@ -3379,6 +3380,246 @@ function SolarPage({ userRole }) {
   );
 }
 
+// ── Portal Admin — visão geral de clientes, OTA e feature flags ──────────────
+const FEATURE_DEFS = [
+  { key: "ENABLE_AI_ANALYTICS",      label: "IA Analytics (F3-F10)" },
+  { key: "ENABLE_FIRE_DETECTION",    label: "🔥 Fogo/Fumaça (F11)" },
+  { key: "ENABLE_TAMPER_DETECTION",  label: "🚫 Câmera Sabotada (F12)" },
+  { key: "ENABLE_CLIP_RECORDING",    label: "📹 Clips de Vídeo" },
+  { key: "ENABLE_DAILY_REPORT",      label: "📊 Relatório Diário" },
+  { key: "ENABLE_OTA",               label: "🔄 Atualização OTA" },
+  { key: "ENABLE_AI_NARRATIVE",      label: "🤖 Narrativa IA (F2)" },
+  { key: "ENABLE_FALL_DETECTION",    label: "🚨 Queda (F10)" },
+  { key: "ENABLE_PLATE_RECOGNITION", label: "🚗 Placas (F5)" },
+  { key: "ENABLE_AUDIO_ANOMALY",     label: "🔊 Áudio Anômalo (F4)" },
+];
+
+function AdminOverviewPage() {
+  const [clients, setClients]   = useState([]);
+  const [manifests, setManifests] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [expandedId, setExpandedId] = useState(null);
+  const [savingId, setSavingId] = useState(null);
+  const [otaForm, setOtaForm]   = useState({ version: "", download_url: "", sha256: "", notes: "", required: false });
+  const [otaSaving, setOtaSaving] = useState(false);
+  const [otaErr, setOtaErr]     = useState("");
+  const [featMap, setFeatMap]   = useState({});
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [cls, mfs] = await Promise.all([
+        api("/admin/clients-status"),
+        api("/admin/ota-manifest"),
+      ]);
+      setClients(Array.isArray(cls) ? cls : []);
+      setManifests(Array.isArray(mfs) ? mfs : []);
+      const fm = {};
+      (Array.isArray(cls) ? cls : []).forEach((c) => { fm[c.id] = { ...(c.features || {}) }; });
+      setFeatMap(fm);
+    } catch { /* silent */ }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const saveFeatures = async (cid) => {
+    setSavingId(cid);
+    try { await api(`/admin/clients/${cid}/features`, { method: "PUT", body: JSON.stringify({ features: featMap[cid] || {} }) }); }
+    catch { /* silent */ }
+    setSavingId(null);
+  };
+
+  const publishOta = async () => {
+    if (!otaForm.version || !otaForm.download_url || !otaForm.sha256) {
+      setOtaErr("Versão, URL e SHA256 são obrigatórios."); return;
+    }
+    setOtaSaving(true); setOtaErr("");
+    try {
+      await api("/admin/ota-manifest", { method: "PUT", body: JSON.stringify(otaForm) });
+      await load();
+      setOtaForm({ version: "", download_url: "", sha256: "", notes: "", required: false });
+    } catch (e) { setOtaErr(e?.error || "Erro ao publicar manifest."); }
+    setOtaSaving(false);
+  };
+
+  const deactivateOta = async (id) => {
+    if (!confirm("Desativar este manifest?")) return;
+    try { await api(`/admin/ota-manifest/${id}`, { method: "DELETE" }); await load(); }
+    catch { /* silent */ }
+  };
+
+  const activeManifest = manifests.find((m) => m.active);
+  const totalOnline    = clients.reduce((s, c) => s + (c.online_count || 0), 0);
+  const totalOffline   = clients.reduce((s, c) => s + (c.offline_count || 0), 0);
+
+  const fmtTs = (ts) => {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 120)  return `${Math.round(diff)}s atrás`;
+    if (diff < 3600) return `${Math.round(diff / 60)}min atrás`;
+    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+
+  if (loading) return <div style={{ color: "#3b9eff", padding: 40 }}>Carregando...</div>;
+
+  return (
+    <div>
+      <div style={S.pageTitle}>🛡 Portal Admin</div>
+      <div style={S.pageSub}>Visão geral de clientes, feature flags e atualizações OTA</div>
+
+      {/* Cards de resumo */}
+      <div style={S.grid(4)}>
+        {[
+          ["Clientes", clients.length,  "#3b9eff"],
+          ["Devices Online",  totalOnline,  "#00c9a7"],
+          ["Devices Offline", totalOffline, totalOffline > 0 ? "#ef4444" : "#64748b"],
+          ["Versão OTA Ativa", activeManifest ? `v${activeManifest.version}` : "—", "#a78bfa"],
+        ].map(([label, val, color]) => (
+          <div key={label} style={S.statCard(color)}>
+            <div style={S.statVal(color)}>{val}</div>
+            <div style={S.statLabel}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabela de clientes */}
+      <div style={{ ...S.card, marginBottom: 28, padding: 0, overflowX: "auto" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(59,158,255,0.08)", fontWeight: 800, color: "#3b9eff", fontSize: 13, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          🏢 Clientes — Status e Features
+        </div>
+        <table style={{ ...S.table, margin: 0, borderSpacing: 0 }}>
+          <thead>
+            <tr>
+              {["Cliente", "Plano", "Online", "Offline", "Último Heartbeat", "Features", ""].map((h) => (
+                <th key={h} style={{ ...S.th, padding: "12px 16px" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {clients.map((c) => (
+              <>
+                <tr key={c.id}>
+                  <td style={{ ...S.td, border: "none", fontWeight: 800, color: "#f1f5f9" }}>{c.name}</td>
+                  <td style={{ ...S.td, border: "none" }}><span style={S.badge("#3b9eff")}>{c.plan}</span></td>
+                  <td style={{ ...S.td, border: "none", color: "#00c9a7", fontWeight: 800 }}>{c.online_count || 0}</td>
+                  <td style={{ ...S.td, border: "none", color: (c.offline_count || 0) > 0 ? "#ef4444" : "#3a5070", fontWeight: 800 }}>{c.offline_count || 0}</td>
+                  <td style={{ ...S.td, border: "none", fontSize: 12, color: "#64748b" }}>{fmtTs(c.last_heartbeat)}</td>
+                  <td style={{ ...S.td, border: "none" }}>
+                    <span style={{ ...S.badge("#00c9a7"), cursor: "default" }}>
+                      {FEATURE_DEFS.filter((f) => featMap[c.id]?.[f.key]).length}/{FEATURE_DEFS.length} ativas
+                    </span>
+                  </td>
+                  <td style={{ ...S.td, border: "none" }}>
+                    <button style={S.btnSm()} onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}>
+                      {expandedId === c.id ? "▲ Fechar" : "⚙ Features"}
+                    </button>
+                  </td>
+                </tr>
+                {expandedId === c.id && (
+                  <tr key={`feat-${c.id}`}>
+                    <td colSpan={7} style={{ ...S.td, border: "none", background: "#0d1929", padding: "16px 20px" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 20px", marginBottom: 14 }}>
+                        {FEATURE_DEFS.map((f) => (
+                          <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#b8cfe8" }}>
+                            <input
+                              type="checkbox"
+                              checked={!!(featMap[c.id]?.[f.key])}
+                              onChange={(e) => setFeatMap((prev) => ({
+                                ...prev,
+                                [c.id]: { ...prev[c.id], [f.key]: e.target.checked ? "1" : "0" },
+                              }))}
+                            />
+                            {f.label}
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        style={{ ...S.btn("primary"), fontSize: 11, padding: "7px 18px" }}
+                        onClick={() => saveFeatures(c.id)}
+                        disabled={savingId === c.id}
+                      >
+                        {savingId === c.id ? "Salvando..." : "💾 Salvar Features"}
+                      </button>
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Painel OTA */}
+      <div style={S.card}>
+        <div style={{ fontWeight: 800, color: "#3b9eff", fontSize: 13, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16 }}>
+          🔄 OTA — Gerenciamento de Atualizações
+        </div>
+
+        {activeManifest && (
+          <div style={{ background: "rgba(0,201,167,0.07)", border: "1px solid rgba(0,201,167,0.2)", borderRadius: 10, padding: "12px 16px", marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: "#00c9a7", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>✅ Versão Ativa</div>
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+              <div><span style={{ color: "#64748b", fontSize: 11 }}>Versão: </span><strong style={{ color: "#f1f5f9" }}>v{activeManifest.version}</strong></div>
+              <div><span style={{ color: "#64748b", fontSize: 11 }}>Obrigatória: </span><strong style={{ color: "#f1f5f9" }}>{activeManifest.required ? "Sim" : "Não"}</strong></div>
+              <div><span style={{ color: "#64748b", fontSize: 11 }}>Publicado: </span><strong style={{ color: "#f1f5f9" }}>{fmtTs(activeManifest.created_at)}</strong></div>
+            </div>
+            {activeManifest.notes && <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>{activeManifest.notes}</div>}
+          </div>
+        )}
+
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Publicar Nova Versão</div>
+        <div style={S.grid(2)}>
+          <div style={S.fg}>
+            <label style={S.label}>Versão (ex: 2.2.0)</label>
+            <input style={S.input} value={otaForm.version} onChange={(e) => setOtaForm((f) => ({ ...f, version: e.target.value }))} placeholder="2.2.0" />
+          </div>
+          <div style={S.fg}>
+            <label style={S.label}>URL de Download</label>
+            <input style={S.input} value={otaForm.download_url} onChange={(e) => setOtaForm((f) => ({ ...f, download_url: e.target.value }))} placeholder="https://..." />
+          </div>
+        </div>
+        <div style={S.fg}>
+          <label style={S.label}>SHA256 do arquivo (64 chars hex)</label>
+          <input style={{ ...S.input, fontFamily: "monospace", fontSize: 11 }} value={otaForm.sha256} onChange={(e) => setOtaForm((f) => ({ ...f, sha256: e.target.value }))} placeholder="a1b2c3d4..." />
+        </div>
+        <div style={S.grid(2)}>
+          <div style={S.fg}>
+            <label style={S.label}>Notas (opcional)</label>
+            <input style={S.input} value={otaForm.notes} onChange={(e) => setOtaForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Correções e melhorias..." />
+          </div>
+          <div style={{ ...S.fg, display: "flex", alignItems: "center", gap: 10, paddingTop: 24 }}>
+            <input type="checkbox" id="required" checked={otaForm.required} onChange={(e) => setOtaForm((f) => ({ ...f, required: e.target.checked }))} />
+            <label htmlFor="required" style={{ fontSize: 13, color: "#b8cfe8", cursor: "pointer" }}>Atualização obrigatória</label>
+          </div>
+        </div>
+        {otaErr && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>⚠️ {otaErr}</div>}
+        <button style={{ ...S.btn("primary") }} onClick={publishOta} disabled={otaSaving}>
+          {otaSaving ? "Publicando..." : "🚀 Publicar Versão"}
+        </button>
+
+        {manifests.length > 0 && (
+          <>
+            <div style={{ ...S.divider }} />
+            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Histórico</div>
+            {manifests.slice(0, 8).map((m) => (
+              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                <span style={{ ...S.badge(m.active ? "#00c9a7" : "#64748b") }}>{m.active ? "ativo" : "inativo"}</span>
+                <span style={{ fontWeight: 700, color: "#f1f5f9", fontSize: 13 }}>v{m.version}</span>
+                <span style={{ fontSize: 11, color: "#64748b", flex: 1 }}>{fmtTs(m.created_at)}</span>
+                {m.active && (
+                  <button style={S.btnSm("danger")} onClick={() => deactivateOta(m.id)}>Desativar</button>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -3522,6 +3763,8 @@ function NexusApp() {
     { id: "events", label: "Eventos", icon: ClipboardList },
     { id: "solar", label: "Solar", icon: Sun },
     { id: "health", label: "Saúde", icon: Activity },
+    { section: "ADMINISTRAÇÃO" },
+    { id: "admin", label: "Portal Admin", icon: Shield },
   ];
 
   const NAV_CLIENT = [
@@ -3553,6 +3796,7 @@ function NexusApp() {
     events:    <EventsPage userRole={userRole} />,
     solar: <SolarPage userRole={userRole} />,
     health: <HealthDashboard />,
+    admin:  <AdminOverviewPage />,
   };
 
   const sidebarStyle = {
