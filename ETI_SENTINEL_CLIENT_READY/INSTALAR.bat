@@ -24,7 +24,7 @@ if !errorLevel! NEQ 0 (
 
 echo.
 echo  ========================================================
-echo    ETI SENTINEL EDGE - Instalador v2.0
+echo    ETI SENTINEL EDGE - Instalador v2.1
 echo  ========================================================
 echo.
 
@@ -147,7 +147,15 @@ set "PS_TMP=%TEMP%\eti_setup_%RANDOM%.ps1"
     echo     '# ENABLE_DIRECTIONAL_COUNTER=1   # F7: Contador entrada/saida',
     echo     '# ENABLE_LOITERING=1             # F8: Permanencia prolongada',
     echo     '# ENABLE_HEATMAP=1               # F9: Mapa de calor',
-    echo     '# ENABLE_FALL_DETECTION=1        # F10: Queda de pessoa'
+    echo     '# ENABLE_FALL_DETECTION=1        # F10: Queda de pessoa',
+    echo     '# ENABLE_FIRE_DETECTION=1        # F11: Fogo e fumaca',
+    echo     '# ENABLE_TAMPER_DETECTION=1      # F12: Camera sabotada/coberta',
+    echo     '# --- Gravacao e Relatorios ---',
+    echo     '# ENABLE_CLIP_RECORDING=1        # Grava clip MP4 de 12s antes de cada alerta',
+    echo     '# ENABLE_DAILY_REPORT=1          # Relatorio diario via Telegram as 23h',
+    echo     '# --- Atualizacao automatica (OTA) ---',
+    echo     'ENABLE_OTA=0',
+    echo     'AGENT_VERSION=2.1.0'
     echo ^)
     echo [System.IO.File]::WriteAllLines^($Dest, $content, [System.Text.UTF8Encoding]::new^($false^)^)
 ) > "!PS_TMP!"

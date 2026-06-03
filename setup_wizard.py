@@ -479,6 +479,14 @@ class Wizard(tk.Tk):
                 "# ENABLE_LOITERING=1             # F8: Permanencia prolongada",
                 "# ENABLE_HEATMAP=1               # F9: Mapa de calor",
                 "# ENABLE_FALL_DETECTION=1        # F10: Queda de pessoa",
+                "# ENABLE_FIRE_DETECTION=1        # F11: Fogo e fumaca",
+                "# ENABLE_TAMPER_DETECTION=1      # F12: Camera sabotada/coberta",
+                "# --- Gravacao e Relatorios ---",
+                "# ENABLE_CLIP_RECORDING=1        # Clips MP4 de 12s antes de cada alerta",
+                "# ENABLE_DAILY_REPORT=1          # Relatorio diario via Telegram as 23h",
+                "# --- Atualizacao automatica (OTA) ---",
+                "ENABLE_OTA=0",
+                "AGENT_VERSION=2.1.0",
             ])
             with open(DESTINO / ".env", "w", encoding="utf-8", newline="\n") as fp:
                 fp.write(env_lines + "\n")

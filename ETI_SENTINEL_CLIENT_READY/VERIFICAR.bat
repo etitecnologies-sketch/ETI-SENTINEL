@@ -76,6 +76,20 @@ echo  Verificando Dashboard local (http://localhost:8808)...
 powershell -NoProfile -Command ^
     "try { $r = Invoke-WebRequest 'http://localhost:8808/health' -TimeoutSec 3 -UseBasicParsing; Write-Host '  [OK] Dashboard ativo! Status:' $r.StatusCode } catch { Write-Host '  [!] Dashboard nao respondeu (agente pode estar iniciando).' }" 2>nul
 
+:: Verifica conectividade com a Railway
+echo.
+echo  Verificando conexao com a nuvem (Railway)...
+powershell -NoProfile -Command ^
+    "try { $r = Invoke-WebRequest 'https://eti-sentinel-production.up.railway.app/health' -TimeoutSec 8 -UseBasicParsing; Write-Host '  [OK] Railway Online! Status:' $r.StatusCode } catch { Write-Host '  [X] Sem conexao com a Railway. Verifique a internet.' }" 2>nul
+
+:: Exibe versao instalada do agente
+echo.
+if exist "!DESTINO!\.env" (
+    for /f "tokens=2 delims==" %%v in ('findstr "AGENT_VERSION" "!DESTINO!\.env"') do (
+        echo  Versao do agente: %%v
+    )
+)
+
 :fim
 echo.
 echo  ========================================================
