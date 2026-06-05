@@ -333,6 +333,48 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+// ── Regras de IA padrão ───────────────────────────────────────
+const _DEFAULT_AI_RULES = [
+  { name: "🚨 Pessoa detectada",   event_type: "ai_person_detected",   cooldown: 60,  msg: "🚨 Pessoa detectada | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "🔥 Fogo detectado",     event_type: "ai_fire_detected",     cooldown: 30,  msg: "🔥 FOGO detectado! | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "💨 Fumaça detectada",   event_type: "ai_smoke_detected",    cooldown: 60,  msg: "💨 Fumaça detectada | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "📷 Câmera sabotada",    event_type: "ai_camera_tampered",   cooldown: 30,  msg: "📷 Câmera sabotada! | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "👥 Multidão detectada", event_type: "ai_crowd_alert",       cooldown: 120, msg: "👥 Multidão | Câm {e0.device_id} — {e0.ai_people_count} pessoas" },
+  { name: "🚧 Zona invadida",      event_type: "ai_zone_intrusion",    cooldown: 60,  msg: "🚧 Zona invadida | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "🤸 Queda detectada",    event_type: "ai_fall_detected",     cooldown: 30,  msg: "🤸 QUEDA detectada! | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "🎒 Objeto abandonado",  event_type: "ai_abandoned_object",  cooldown: 120, msg: "🎒 Objeto abandonado | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "🏃 Perambulação",       event_type: "ai_loitering",         cooldown: 120, msg: "🏃 Perambulação detectada | Câm {e0.device_id} Ch{e0.channel}" },
+  { name: "📏 Cruzamento de linha",event_type: "ai_line_crossing",     cooldown: 60,  msg: "📏 Cruzamento de linha | Câm {e0.device_id} Ch{e0.channel}" },
+];
+
+async function seedDefaultRules(clientId) {
+  try {
+    const existing = await pool.query(
+      "SELECT name FROM automation_rules WHERE client_id=$1",
+      [clientId]
+    );
+    const existingNames = new Set(existing.rows.map(r => r.name));
+
+    for (const def of _DEFAULT_AI_RULES) {
+      if (existingNames.has(def.name)) continue;
+      const rule = {
+        within_seconds: 30,
+        cooldown_seconds: def.cooldown,
+        if_all: [{ event_type: def.event_type }],
+        actions: [{ type: "notify", channels: ["telegram", "whatsapp"] }],
+        message: def.msg,
+      };
+      await pool.query(
+        "INSERT INTO automation_rules (name, enabled, client_id, rule, created_at, updated_at) VALUES ($1,true,$2,$3::jsonb,NOW(),NOW())",
+        [def.name, clientId, JSON.stringify(rule)]
+      );
+    }
+    console.log(`[seedDefaultRules] Regras IA criadas para client_id=${clientId}`);
+  } catch (e) {
+    console.error(`[seedDefaultRules] Erro client_id=${clientId}:`, e.message);
+  }
+}
+
 // ── Database Initialization ──────────────────────────────────
 async function initDB() {
   try {
@@ -602,6 +644,16 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_ota_manifests_active
         ON ota_manifests (active, created_at DESC);
     `).catch(e => console.log("OTA Tables Error:", e.message));
+
+    // Seed regras IA padrão para clientes sem nenhuma regra
+    const clientsWithoutRules = await pool.query(`
+      SELECT c.id FROM clients c
+      LEFT JOIN automation_rules ar ON ar.client_id = c.id
+      WHERE ar.id IS NULL
+    `).catch(() => ({ rows: [] }));
+    for (const row of clientsWithoutRules.rows) {
+      await seedDefaultRules(row.id);
+    }
 
     console.log("Database Professional Restore: OK");
   } catch (e) { console.error("DB Restore Error:", e.message); }
@@ -2180,6 +2232,8 @@ app.post("/clients", auth, superadmin, async (req, res) => {
     alert_email||"", wa_instance||"", wa_token||"", wa_number||"", notes||"",
     collectorHash
   ]);
+  const newClientId = r.rows[0]?.id;
+  if (newClientId) seedDefaultRules(newClientId);
   res.status(201).json({
     ...r.rows[0],
     collector_key_set: true,
