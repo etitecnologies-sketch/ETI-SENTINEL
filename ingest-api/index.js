@@ -2923,7 +2923,8 @@ app.get("/admin/clients-status", auth, superadmin, async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT c.id, c.name, c.status, c.plan, c.city,
-             COALESCE(c.features, '{}')::jsonb AS features,
+             COALESCE(c.features, '{}')::jsonb   AS features,
+             COALESCE(c.env_patch, '{}')::jsonb  AS env_patch,
              COUNT(DISTINCT d.id)::int                                               AS device_count,
              COUNT(DISTINCT CASE WHEN d.status='online'  THEN d.id END)::int        AS online_count,
              COUNT(DISTINCT CASE WHEN d.status='offline' THEN d.id END)::int        AS offline_count,

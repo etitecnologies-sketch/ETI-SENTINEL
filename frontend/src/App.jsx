@@ -3403,7 +3403,10 @@ function AdminOverviewPage() {
   const [otaForm, setOtaForm]   = useState({ version: "", download_url: "", sha256: "", notes: "", required: false });
   const [otaSaving, setOtaSaving] = useState(false);
   const [otaErr, setOtaErr]     = useState("");
-  const [featMap, setFeatMap]   = useState({});
+  const [featMap, setFeatMap]       = useState({});
+  const [envPatchMap, setEnvPatchMap] = useState({});
+  const [expandedEnvId, setExpandedEnvId] = useState(null);
+  const [savingEnvId, setSavingEnvId]     = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -3415,8 +3418,13 @@ function AdminOverviewPage() {
       setClients(Array.isArray(cls) ? cls : []);
       setManifests(Array.isArray(mfs) ? mfs : []);
       const fm = {};
-      (Array.isArray(cls) ? cls : []).forEach((c) => { fm[c.id] = { ...(c.features || {}) }; });
+      const epm = {};
+      (Array.isArray(cls) ? cls : []).forEach((c) => {
+        fm[c.id]  = { ...(c.features  || {}) };
+        epm[c.id] = { ...(c.env_patch || {}) };
+      });
       setFeatMap(fm);
+      setEnvPatchMap(epm);
     } catch { /* silent */ }
     setLoading(false);
   };
@@ -3429,6 +3437,21 @@ function AdminOverviewPage() {
     catch { /* silent */ }
     setSavingId(null);
   };
+
+  const saveEnvPatch = async (cid) => {
+    setSavingEnvId(cid);
+    try {
+      const patch = {};
+      Object.entries(envPatchMap[cid] || {}).forEach(([k, v]) => {
+        if (v !== "" && v !== undefined && v !== null) patch[k] = String(v);
+      });
+      await api(`/admin/clients/${cid}/env-patch`, { method: "PUT", body: JSON.stringify({ env_patch: patch }) });
+    } catch { /* silent */ }
+    setSavingEnvId(null);
+  };
+
+  const setEnvVar = (cid, key, value) =>
+    setEnvPatchMap((prev) => ({ ...prev, [cid]: { ...(prev[cid] || {}), [key]: value } }));
 
   const publishOta = async () => {
     if (!otaForm.version || !otaForm.download_url || !otaForm.sha256) {
@@ -3512,9 +3535,14 @@ function AdminOverviewPage() {
                     </span>
                   </td>
                   <td style={{ ...S.td, border: "none" }}>
-                    <button style={S.btnSm()} onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}>
-                      {expandedId === c.id ? "▲ Fechar" : "⚙ Features"}
-                    </button>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button style={S.btnSm()} onClick={() => { setExpandedId(expandedId === c.id ? null : c.id); setExpandedEnvId(null); }}>
+                        {expandedId === c.id ? "▲ Fechar" : "⚙ Features"}
+                      </button>
+                      <button style={{ ...S.btnSm(), background: "rgba(124,58,237,0.12)", color: "#a78bfa", borderColor: "rgba(124,58,237,0.3)" }} onClick={() => { setExpandedEnvId(expandedEnvId === c.id ? null : c.id); setExpandedId(null); }}>
+                        {expandedEnvId === c.id ? "▲ Fechar" : "📡 Config .env"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
                 {expandedId === c.id && (
@@ -3542,6 +3570,79 @@ function AdminOverviewPage() {
                       >
                         {savingId === c.id ? "Salvando..." : "💾 Salvar Features"}
                       </button>
+                    </td>
+                  </tr>
+                )}
+                {expandedEnvId === c.id && (
+                  <tr key={`env-${c.id}`}>
+                    <td colSpan={7} style={{ ...S.td, border: "none", background: "#0a0f1e", padding: "20px 24px" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>
+                        📡 Configuração Remota — {c.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
+                        As variáveis abaixo serão enviadas ao agente na próxima verificação OTA (até 1h) e aplicadas automaticamente.
+                      </div>
+
+                      {/* Analíticos de Vídeo */}
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Analíticos de Vídeo</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 24px", marginBottom: 18 }}>
+                        {[
+                          { key: "ENABLE_AI_ANALYTICS",     label: "🤖 IA Analytics (câmeras)" },
+                          { key: "ENABLE_FIRE_DETECTION",   label: "🔥 Fogo e Fumaça" },
+                          { key: "ENABLE_TAMPER_DETECTION", label: "🚫 Câmera Sabotada" },
+                          { key: "ENABLE_FALL_DETECTION",   label: "🚨 Queda de Pessoa" },
+                          { key: "ENABLE_LOITERING",        label: "⏱️ Permanência Suspeita" },
+                          { key: "ENABLE_HEATMAP",          label: "🌡️ Mapa de Calor" },
+                          { key: "ENABLE_CLIP_RECORDING",   label: "📹 Gravação de Clips" },
+                          { key: "ENABLE_DAILY_REPORT",     label: "📊 Relatório Diário" },
+                          { key: "ENABLE_OTA",              label: "🔄 Atualização OTA" },
+                        ].map(({ key, label }) => (
+                          <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#b8cfe8" }}>
+                            <input
+                              type="checkbox"
+                              checked={(envPatchMap[c.id]?.[key] ?? "") === "1"}
+                              onChange={(e) => setEnvVar(c.id, key, e.target.checked ? "1" : "0")}
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+
+                      {/* Parâmetros avançados */}
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Parâmetros Avançados</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12, marginBottom: 18 }}>
+                        {[
+                          { key: "AI_CLASSES",               label: "Classes detectadas",       placeholder: "person,car,motorcycle" },
+                          { key: "AI_CONF_THRESHOLD",        label: "Confiança mínima (0-1)",   placeholder: "0.50" },
+                          { key: "AI_EVENT_COOLDOWN_SECONDS",label: "Cooldown entre alertas (s)",placeholder: "300" },
+                          { key: "AI_FRAME_EVERY_SECONDS",   label: "Intervalo de análise (s)", placeholder: "1.0" },
+                          { key: "AI_PEOPLE_MAX_COUNT",      label: "Limite de lotação",        placeholder: "0 = desabilitado" },
+                          { key: "LOG_LEVEL",                label: "Nível de log",             placeholder: "INFO / DEBUG / WARNING" },
+                        ].map(({ key, label, placeholder }) => (
+                          <div key={key}>
+                            <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>{label}</label>
+                            <input
+                              style={{ ...S.input, fontSize: 12, fontFamily: "monospace", padding: "6px 10px" }}
+                              value={envPatchMap[c.id]?.[key] ?? ""}
+                              placeholder={placeholder}
+                              onChange={(e) => setEnvVar(c.id, key, e.target.value)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <button
+                          style={{ ...S.btn("primary"), background: "#7c3aed", fontSize: 11, padding: "7px 20px" }}
+                          onClick={() => saveEnvPatch(c.id)}
+                          disabled={savingEnvId === c.id}
+                        >
+                          {savingEnvId === c.id ? "Enviando..." : "🚀 Enviar para Agente"}
+                        </button>
+                        <span style={{ fontSize: 11, color: "#64748b" }}>
+                          O agente aplicará as mudanças na próxima verificação (até 1h) e reiniciará automaticamente.
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 )}
