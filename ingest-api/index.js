@@ -3103,6 +3103,40 @@ app.delete("/admin/ota-manifest/:id", auth, superadmin, async (req, res) => {
   }
 });
 
+// POST /admin/test-notify — envia mensagem de teste no Telegram do cliente
+app.post("/admin/test-notify", auth, superadmin, async (req, res) => {
+  const clientId = parseInt(req.body?.client_id);
+  if (!clientId || !Number.isFinite(clientId) || clientId <= 0) {
+    return res.status(400).json({ error: "client_id obrigatório" });
+  }
+  try {
+    const r = await pool.query(
+      "SELECT name, telegram_token, telegram_chat_id FROM clients WHERE id=$1 LIMIT 1",
+      [clientId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: "Cliente não encontrado" });
+    const { name, telegram_token, telegram_chat_id } = r.rows[0];
+    if (!telegram_token || !telegram_chat_id) {
+      return res.status(422).json({ error: "Cliente sem Telegram configurado (token ou chat_id ausente)" });
+    }
+    const msg = `✅ ETI SENTINEL — Teste de notificação\nCliente: ${name}\n🕐 ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}`;
+    const cleanTok = telegram_token.toLowerCase().startsWith("bot") ? telegram_token.slice(3) : telegram_token;
+    const tgRes = await fetch(`https://api.telegram.org/bot${cleanTok}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: telegram_chat_id, text: msg }),
+    });
+    const tgBody = await tgRes.json().catch(() => ({}));
+    if (!tgRes.ok) {
+      return res.status(502).json({ ok: false, client: name, telegram_error: tgBody?.description || tgRes.status });
+    }
+    res.json({ ok: true, client: name });
+  } catch (e) {
+    console.error("/admin/test-notify error:", e.message);
+    res.status(500).json({ error: "Falha ao enviar teste", detail: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 const TCP_PORT = process.env.TCP_PORT || 3002; // Porta para o Registro Automático da Intelbras (Alterada de 3001 para 3002 para evitar conflito com WebSocket)
 

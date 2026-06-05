@@ -3407,6 +3407,8 @@ function AdminOverviewPage() {
   const [envPatchMap, setEnvPatchMap] = useState({});
   const [expandedEnvId, setExpandedEnvId] = useState(null);
   const [savingEnvId, setSavingEnvId]     = useState(null);
+  const [testingNotify, setTestingNotify] = useState(null);
+  const [notifyResult, setNotifyResult]   = useState({});
 
   const load = async () => {
     setLoading(true);
@@ -3452,6 +3454,19 @@ function AdminOverviewPage() {
 
   const setEnvVar = (cid, key, value) =>
     setEnvPatchMap((prev) => ({ ...prev, [cid]: { ...(prev[cid] || {}), [key]: value } }));
+
+  const testNotify = async (cid) => {
+    setTestingNotify(cid);
+    setNotifyResult((p) => ({ ...p, [cid]: null }));
+    try {
+      const r = await api("/admin/test-notify", { method: "POST", body: JSON.stringify({ client_id: cid }) });
+      setNotifyResult((p) => ({ ...p, [cid]: { ok: true, msg: `✅ Telegram enviado para ${r.client}` } }));
+    } catch (e) {
+      setNotifyResult((p) => ({ ...p, [cid]: { ok: false, msg: `❌ ${e?.message || "Falha ao enviar"}` } }));
+    } finally {
+      setTestingNotify(null);
+    }
+  };
 
   const publishOta = async () => {
     if (!otaForm.version || !otaForm.download_url || !otaForm.sha256) {
@@ -3535,14 +3550,27 @@ function AdminOverviewPage() {
                     </span>
                   </td>
                   <td style={{ ...S.td, border: "none" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button style={S.btnSm()} onClick={() => { setExpandedId(expandedId === c.id ? null : c.id); setExpandedEnvId(null); }}>
                         {expandedId === c.id ? "▲ Fechar" : "⚙ Features"}
                       </button>
                       <button style={{ ...S.btnSm(), background: "rgba(124,58,237,0.12)", color: "#a78bfa", borderColor: "rgba(124,58,237,0.3)" }} onClick={() => { setExpandedEnvId(expandedEnvId === c.id ? null : c.id); setExpandedId(null); }}>
                         {expandedEnvId === c.id ? "▲ Fechar" : "📡 Config .env"}
                       </button>
+                      <button
+                        style={{ ...S.btnSm(), background: "rgba(34,197,94,0.12)", color: "#4ade80", borderColor: "rgba(34,197,94,0.3)" }}
+                        onClick={() => testNotify(c.id)}
+                        disabled={testingNotify === c.id}
+                        title="Envia mensagem de teste no Telegram do cliente"
+                      >
+                        {testingNotify === c.id ? "..." : "📨 Testar"}
+                      </button>
                     </div>
+                    {notifyResult[c.id] && (
+                      <div style={{ fontSize: 11, marginTop: 4, color: notifyResult[c.id].ok ? "#4ade80" : "#f87171" }}>
+                        {notifyResult[c.id].msg}
+                      </div>
+                    )}
                   </td>
                 </tr>
                 {expandedId === c.id && (
