@@ -588,6 +588,7 @@ async function initDB() {
     // OTA e feature flags por cliente
     await pool.query(`
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS features JSONB DEFAULT '{}';
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS env_patch JSONB DEFAULT '{}';
       CREATE TABLE IF NOT EXISTS ota_manifests (
         id           SERIAL PRIMARY KEY,
         version      VARCHAR(32)  NOT NULL,
@@ -2867,7 +2868,7 @@ async function cloudMonitor(deviceId = null) {
 
 // ── OTA e Feature Flags ─────────────────────────────────────────────────────
 
-// GET /collector/update-check — edge agent verifica nova versão
+// GET /collector/update-check — edge agent verifica nova versão e env_patch
 app.get("/collector/update-check", async (req, res) => {
   const authz = await authorizeCollector(req);
   if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
@@ -2875,20 +2876,27 @@ app.get("/collector/update-check", async (req, res) => {
   const clientVersion = sanitize(req.query.version || "").trim();
 
   try {
-    const r = await pool.query(
-      "SELECT version, download_url, sha256, notes, required FROM ota_manifests WHERE active=true ORDER BY created_at DESC LIMIT 1"
-    );
-    if (!r.rows.length) return res.json({ up_to_date: true });
+    const [manifestResult, clientResult] = await Promise.all([
+      pool.query(
+        "SELECT version, download_url, sha256, notes, required FROM ota_manifests WHERE active=true ORDER BY created_at DESC LIMIT 1"
+      ),
+      pool.query("SELECT env_patch FROM clients WHERE id=$1 LIMIT 1", [authz.client_id]),
+    ]);
 
-    const m = r.rows[0];
-    if (m.version === clientVersion) return res.json({ up_to_date: true });
+    const envPatch = clientResult.rows[0]?.env_patch || {};
 
+    if (!manifestResult.rows.length || manifestResult.rows[0].version === clientVersion) {
+      return res.json({ up_to_date: true, env_patch: envPatch });
+    }
+
+    const m = manifestResult.rows[0];
     res.json({
       version:      m.version,
       download_url: m.download_url,
       sha256:       m.sha256,
       notes:        m.notes || "",
       required:     !!m.required,
+      env_patch:    envPatch,
     });
   } catch (e) {
     console.error("/collector/update-check error:", e.message);
@@ -2946,6 +2954,48 @@ app.put("/admin/clients/:id/features", auth, superadmin, async (req, res) => {
   } catch (e) {
     console.error("/admin/clients/:id/features error:", e.message);
     res.status(500).json({ error: "Failed to update features" });
+  }
+});
+
+// PUT /admin/clients/:id/env-patch — configura vars do .env a distribuir via OTA
+app.put("/admin/clients/:id/env-patch", auth, superadmin, async (req, res) => {
+  const cid = parseInt(req.params.id);
+  if (!cid || !Number.isFinite(cid)) return res.status(400).json({ error: "invalid id" });
+
+  const patch = req.body.env_patch;
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    return res.status(400).json({ error: "env_patch deve ser um objeto chave-valor" });
+  }
+
+  const BLOCKED = new Set(["COLLECTOR_KEY", "INGEST_API_URL", "CLIENT_ID", "AGENT_API_PORT", "AGENT_API_BIND", "JWT_SECRET"]);
+  const safe = {};
+  for (const [k, v] of Object.entries(patch)) {
+    const key = String(k).trim().toUpperCase();
+    if (!key || BLOCKED.has(key)) continue;
+    if (typeof v !== "string" && typeof v !== "number") continue;
+    safe[key] = String(v).trim();
+  }
+
+  try {
+    await pool.query("UPDATE clients SET env_patch=$1 WHERE id=$2", [JSON.stringify(safe), cid]);
+    res.json({ ok: true, client_id: cid, env_patch: safe });
+  } catch (e) {
+    console.error("/admin/clients/:id/env-patch error:", e.message);
+    res.status(500).json({ error: "Failed to update env_patch" });
+  }
+});
+
+// GET /admin/clients/:id/env-patch — lê env_patch atual de um cliente
+app.get("/admin/clients/:id/env-patch", auth, superadmin, async (req, res) => {
+  const cid = parseInt(req.params.id);
+  if (!cid || !Number.isFinite(cid)) return res.status(400).json({ error: "invalid id" });
+  try {
+    const r = await pool.query("SELECT env_patch FROM clients WHERE id=$1 LIMIT 1", [cid]);
+    if (!r.rows.length) return res.status(404).json({ error: "client not found" });
+    res.json({ client_id: cid, env_patch: r.rows[0].env_patch || {} });
+  } catch (e) {
+    console.error("/admin/clients/:id/env-patch GET error:", e.message);
+    res.status(500).json({ error: "Failed to fetch env_patch" });
   }
 });
 

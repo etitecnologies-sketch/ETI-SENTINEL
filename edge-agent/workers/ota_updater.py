@@ -5,18 +5,14 @@ Verifica periodicamente se há uma nova versão do agente disponível na nuvem.
 Quando detecta atualização: baixa, valida SHA256, grava script de substituição
 e reinicia o agente sem intervenção do técnico.
 
-Fluxo:
+Fluxo EXE:
   1. Chama GET /collector/update-check com a versão atual.
-  2. Se a API retornar { up_to_date: true } → nada a fazer.
-  3. Se retornar { version, download_url, sha256 } → inicia download.
-  4. Valida SHA256 do arquivo baixado.
-  5. Salva o novo EXE em <exe_dir>/_new_agent.exe.
-  6. Grava <exe_dir>/_updater.bat que:
-       • Aguarda 4s para o processo atual encerrar
-       • Substitui o EXE atual pelo novo
-       • Relança o agente novo
-       • Remove a si mesmo
-  7. Lança _updater.bat (detached) e chama sys.exit(0).
+  2. Se retornar { version, download_url, sha256 } → baixa e substitui EXE.
+
+Fluxo env_patch (sempre que ENABLE_OTA=1):
+  1. A mesma resposta do update-check inclui { env_patch: {KEY: "valor"} }.
+  2. Aplica as variáveis no .env local (apenas chaves permitidas).
+  3. Se algo mudou → reinicia o agente para aplicar as novas configurações.
 
 Variáveis de ambiente:
   ENABLE_OTA               1 para ativar (padrão: 0)
@@ -41,6 +37,21 @@ logger = logging.getLogger(__name__)
 
 # Versão atual do agente — deve ser atualizada a cada build
 AGENT_VERSION = os.getenv("AGENT_VERSION") or "2.1.0"
+
+# Chaves que o servidor pode atualizar remotamente via env_patch.
+# Chaves sensíveis (credenciais, URLs, portas) estão deliberadamente ausentes.
+_PATCHABLE_KEYS = {
+    "ENABLE_AI_ANALYTICS", "ENABLE_FIRE_DETECTION", "ENABLE_TAMPER_DETECTION",
+    "ENABLE_FALL_DETECTION", "ENABLE_LOITERING", "ENABLE_DIRECTIONAL_COUNTER",
+    "ENABLE_HEATMAP", "ENABLE_CLIP_RECORDING", "ENABLE_DAILY_REPORT",
+    "ENABLE_OTA", "ENABLE_AUDIO_ANOMALY", "ENABLE_BEHAVIORAL_LEARNING",
+    "ENABLE_PLATE_RECOGNITION", "AI_CLASSES", "AI_CONF_THRESHOLD",
+    "AI_NMS_THRESHOLD", "AI_PEOPLE_MAX_COUNT", "AI_FRAME_EVERY_SECONDS",
+    "AI_EVENT_COOLDOWN_SECONDS", "AI_STARTUP_DELAY_SECONDS", "AI_MIN_CONFIRM_FRAMES",
+    "LOG_LEVEL", "OTA_CHECK_INTERVAL_MIN", "AGENT_VERSION",
+    "EDGE_SUPPRESS_EVENT_TYPES", "EDGE_VIDEOLOSS_CONFIRM_SECONDS",
+    "EDGE_RECOVERY_CONFIRM_SECONDS", "EDGE_NOTIFY_RECOVERY",
+}
 
 
 def _env_float(key: str, default: float) -> float:
@@ -109,6 +120,82 @@ class OTAUpdater:
     def stop(self) -> None:
         self._stop = True
 
+    # ---- Localização do .env ----
+
+    def _env_path(self) -> Path:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent / ".env"
+        return Path(__file__).resolve().parent.parent / ".env"
+
+    # ---- Aplicação de env_patch ----
+
+    def _apply_env_patch(self, patch: dict) -> bool:
+        """
+        Aplica variáveis de configuração no .env local.
+        Retorna True se qualquer linha foi alterada ou adicionada.
+        Seguro: só aceita chaves da lista _PATCHABLE_KEYS.
+        """
+        if not patch or not isinstance(patch, dict):
+            return False
+
+        safe: dict = {}
+        for k, v in patch.items():
+            key = str(k).strip().upper()
+            if key not in _PATCHABLE_KEYS:
+                logger.warning(f"[OTA] env_patch: chave bloqueada ignorada — {key}")
+                continue
+            safe[key] = str(v).strip()
+
+        if not safe:
+            return False
+
+        env_path = self._env_path()
+        lines: list = []
+        if env_path.exists():
+            try:
+                lines = env_path.read_text(encoding="utf-8").splitlines()
+            except Exception as exc:
+                logger.error(f"[OTA] Falha ao ler .env: {exc}")
+                return False
+
+        changed = False
+        applied: set = set()
+        new_lines: list = []
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                new_lines.append(line)
+                continue
+            key = stripped.split("=", 1)[0].strip().upper()
+            if key in safe:
+                new_line = f"{key}={safe[key]}"
+                if stripped != new_line:
+                    logger.info(f"[OTA] .env atualizado: {key}={safe[key]!r} (era {stripped!r})")
+                    changed = True
+                new_lines.append(new_line)
+                applied.add(key)
+            else:
+                new_lines.append(line)
+
+        for key, val in safe.items():
+            if key not in applied:
+                new_lines.append(f"{key}={val}")
+                logger.info(f"[OTA] .env adicionado: {key}={val!r}")
+                changed = True
+
+        if not changed:
+            return False
+
+        try:
+            env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            logger.info(f"[OTA] .env gravado em {env_path}")
+        except Exception as exc:
+            logger.error(f"[OTA] Falha ao gravar .env: {exc}")
+            return False
+
+        return True
+
     # ---- Loop de verificação ----
 
     def _loop(self) -> None:
@@ -116,11 +203,12 @@ class OTAUpdater:
         time.sleep(120)
 
         while not self._stop:
-            if os.getenv("ENABLE_OTA", "0").strip() in {"1", "true", "yes"}:
-                try:
-                    self._check_and_update()
-                except Exception as exc:
-                    logger.error(f"[OTA] Erro na verificação: {exc}")
+            # env_patch roda sempre que COLLECTOR_KEY estiver configurado;
+            # download de novo EXE só ocorre se ENABLE_OTA=1.
+            try:
+                self._check_and_update()
+            except Exception as exc:
+                logger.error(f"[OTA] Erro na verificação: {exc}")
 
             interval_min = _env_float("OTA_CHECK_INTERVAL_MIN", 60.0)
             time.sleep(max(10.0, interval_min * 60))
@@ -151,6 +239,15 @@ class OTAUpdater:
         if not isinstance(data, dict):
             return
 
+        # Aplica env_patch independentemente de haver novo EXE
+        env_patch = data.get("env_patch")
+        if isinstance(env_patch, dict) and env_patch:
+            env_changed = self._apply_env_patch(env_patch)
+            if env_changed:
+                logger.info("[OTA] Configuracoes atualizadas via env_patch — reiniciando em 3s...")
+                time.sleep(3)
+                sys.exit(0)
+
         if data.get("up_to_date"):
             if not self._checked:
                 logger.info(f"[OTA] Agente atualizado (v{AGENT_VERSION}).")
@@ -171,6 +268,10 @@ class OTAUpdater:
             f" (atual: v{AGENT_VERSION})"
             f"{'  [OBRIGATÓRIA]' if required else ''}"
         )
+
+        if os.getenv("ENABLE_OTA", "0").strip() not in {"1", "true", "yes"}:
+            logger.info("[OTA] Download de EXE desabilitado (ENABLE_OTA=0). Apenas env_patch ativo.")
+            return
 
         self._apply_update(download_url, expected_sha, new_version)
 
