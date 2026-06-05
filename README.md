@@ -1,6 +1,6 @@
 # ETI SENTINEL — Monitoramento Inteligente de Infraestrutura
 
-Sistema de monitoramento com Edge Agent Windows, alertas em tempo real via Telegram/WhatsApp, painel React e 10 features de IA embarcada.
+Sistema de monitoramento com Edge Agent Windows, alertas em tempo real via Telegram/WhatsApp, painel React, 12 features de IA embarcada e configuração remota de clientes via OTA.
 
 ---
 
@@ -86,7 +86,9 @@ AGENT_API_PORT=8808
 EDGE_PUSH_URL=http://127.0.0.1:8808/api/push
 ENABLE_STREAMING=1
 ENABLE_DEVICE_MONITOR=1
-ENABLE_AI_ANALYTICS=0
+ENABLE_AI_ANALYTICS=1
+ENABLE_FIRE_DETECTION=1
+ENABLE_TAMPER_DETECTION=1
 
 # Supressão de alertas (não geram notificação no celular)
 EDGE_SUPPRESS_EVENT_TYPES=edge_heartbeat,gateway_heartbeat
@@ -99,7 +101,7 @@ EDGE_FORWARD_SUPPRESS_EVENT_TYPES=edge_heartbeat,gateway_heartbeat
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `ENABLE_AI_ANALYTICS` | `0` | `1` ativa todos os analíticos de vídeo |
+| `ENABLE_AI_ANALYTICS` | `1` | `1` ativa todos os analíticos de vídeo |
 | `ENABLE_AI_NARRATIVE` | `0` | `1` ativa relatório narrativo via Claude Haiku |
 | `ENABLE_AUDIO_ANOMALY` | `0` | `1` ativa detecção de áudio anômalo |
 | `ENABLE_PLATE_RECOGNITION` | `0` | `1` ativa reconhecimento de placas |
@@ -180,6 +182,45 @@ Todas as features são opcionais e ativadas individualmente no `.env`. Requerem 
 
 ---
 
+## Configuração Remota de Clientes (OTA env_patch)
+
+O sistema permite atualizar variáveis do `.env` de clientes já instalados **sem acesso físico ao computador**.
+
+### Como funciona
+
+1. No **Portal Admin** → linha do cliente → botão **📡 Config .env**
+2. Ative/desative features ou ajuste parâmetros no painel
+3. Clique **🚀 Enviar para Agente**
+4. Em até 1 hora o agente recebe, aplica no `.env` e reinicia automaticamente
+
+### Via API (direto)
+
+```http
+PUT /admin/clients/:id/env-patch
+Authorization: Bearer <jwt>
+
+{
+  "env_patch": {
+    "ENABLE_AI_ANALYTICS": "1",
+    "ENABLE_FIRE_DETECTION": "1",
+    "ENABLE_TAMPER_DETECTION": "1",
+    "AI_CONF_THRESHOLD": "0.55"
+  }
+}
+```
+
+### Variáveis permitidas remotamente
+
+As seguintes variáveis podem ser atualizadas via env_patch. Credenciais e URLs são **bloqueadas por segurança** (`COLLECTOR_KEY`, `INGEST_API_URL`, `CLIENT_ID`).
+
+| Categoria | Variáveis |
+|---|---|
+| Analíticos | `ENABLE_AI_ANALYTICS`, `ENABLE_FIRE_DETECTION`, `ENABLE_TAMPER_DETECTION`, `ENABLE_FALL_DETECTION`, `ENABLE_LOITERING`, `ENABLE_HEATMAP`, `ENABLE_CLIP_RECORDING`, `ENABLE_DAILY_REPORT` |
+| Parâmetros | `AI_CLASSES`, `AI_CONF_THRESHOLD`, `AI_NMS_THRESHOLD`, `AI_FRAME_EVERY_SECONDS`, `AI_EVENT_COOLDOWN_SECONDS`, `AI_PEOPLE_MAX_COUNT`, `AI_STARTUP_DELAY_SECONDS` |
+| Sistema | `ENABLE_OTA`, `LOG_LEVEL`, `OTA_CHECK_INTERVAL_MIN`, `AGENT_VERSION` |
+
+---
+
 ## Build e Distribuição
 
 ```powershell
@@ -203,6 +244,12 @@ O EXE gerado tem **~88 MB** (otimizado — era 292 MB antes).
 ---
 
 ## Changelog
+
+### 2026-06-05
+
+- **fix (instalador):** `INSTALAR.bat` e `build_exe.py` geravam `.env` com `ENABLE_AI_ANALYTICS=0` — analíticos de vídeo nunca eram ativados nos clientes. Corrigido para `=1` por padrão. `ENABLE_FIRE_DETECTION=1` e `ENABLE_TAMPER_DETECTION=1` também ativados por padrão.
+- **feat (OTA env_patch):** OTA agora distribui configurações do `.env` remotamente sem acesso físico ao cliente. Backend: coluna `clients.env_patch JSONB`, endpoint `PUT /admin/clients/:id/env-patch`, `env_patch` incluído na resposta do `/collector/update-check`. Agente: `_apply_env_patch()` com allowlist de segurança — aplica no `.env` e reinicia se houver mudanças.
+- **feat (Admin):** Botão **📡 Config .env** no Portal Admin para cada cliente — toggles visuais para features de IA e inputs para parâmetros avançados, sem precisar usar a API diretamente.
 
 ### [não commitado] — 2026-06-02
 
@@ -286,6 +333,11 @@ ETI SENTINEL/
 │   │   ├── loitering_detector.py      # F8
 │   │   ├── heatmap_generator.py       # F9
 │   │   ├── fall_detector.py           # F10
+│   │   ├── fire_smoke_detector.py     # F11 — Fogo e Fumaça
+│   │   ├── tamper_detector.py         # F12 — Câmera Sabotada
+│   │   ├── clip_recorder.py           # Gravação de clips MP4
+│   │   ├── report_generator.py        # Relatório diário
+│   │   ├── ota_updater.py             # OTA — atualização EXE + env_patch
 │   │   ├── heartbeat_worker.py
 │   │   ├── stream_worker.py
 │   │   └── watchdog_worker.py
@@ -309,7 +361,7 @@ ETI SENTINEL/
 
 ---
 
-## Estado Atual do Sistema (2026-05-31)
+## Estado Atual do Sistema (2026-06-05)
 
 | Item | Status |
 |---|---|
@@ -319,6 +371,9 @@ ETI SENTINEL/
 | Dashboard local | `http://localhost:8808` |
 | Inicialização automática | HKCU Run (login do usuário) |
 | Instalador visual | `ETI_SENTINEL_Setup.exe` disponível |
-| Analíticos de IA | Disponíveis — ativar com `ENABLE_AI_ANALYTICS=1` |
+| Analíticos de IA | **Ativos por padrão** — `ENABLE_AI_ANALYTICS=1` no instalador |
+| Fogo e Fumaça (F11) | **Ativo por padrão** — `ENABLE_FIRE_DETECTION=1` no instalador |
+| Câmera Sabotada (F12) | **Ativo por padrão** — `ENABLE_TAMPER_DETECTION=1` no instalador |
+| OTA env_patch | Operacional — configurações distribuídas remotamente pelo painel admin |
 | Cooldown de eventos IA | 300s (edge) / 600s (processor para `ai_*` genéricos) |
 | Deduplicação de alertas | Por dispositivo, TTL 120s |
