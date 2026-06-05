@@ -136,8 +136,8 @@ set "PS_TMP=%TEMP%\eti_setup_%RANDOM%.ps1"
     echo     'LOG_LEVEL=INFO',
     echo     'EDGE_SUPPRESS_EVENT_TYPES=edge_heartbeat,gateway_heartbeat',
     echo     'EDGE_FORWARD_SUPPRESS_EVENT_TYPES=edge_heartbeat,gateway_heartbeat',
-    echo     '# --- Analiticos de Video (requer ENABLE_AI_ANALYTICS=1) ---',
-    echo     'ENABLE_AI_ANALYTICS=0',
+    echo     '# --- Analiticos de Video ---',
+    echo     'ENABLE_AI_ANALYTICS=1',
     echo     'AI_STARTUP_DELAY_SECONDS=20',
     echo     'AI_CLASSES=person,car,motorcycle',
     echo     'AI_PEOPLE_MAX_COUNT=0',
@@ -147,7 +147,9 @@ set "PS_TMP=%TEMP%\eti_setup_%RANDOM%.ps1"
     echo     '# ENABLE_DIRECTIONAL_COUNTER=1   # F7: Contador entrada/saida',
     echo     '# ENABLE_LOITERING=1             # F8: Permanencia prolongada',
     echo     '# ENABLE_HEATMAP=1               # F9: Mapa de calor',
-    echo     '# ENABLE_FALL_DETECTION=1        # F10: Queda de pessoa'
+    echo     '# ENABLE_FALL_DETECTION=1        # F10: Queda de pessoa',
+    echo     'ENABLE_FIRE_DETECTION=1',
+    echo     'ENABLE_TAMPER_DETECTION=1'
     echo ^)
     echo [System.IO.File]::WriteAllLines^($Dest, $content, [System.Text.UTF8Encoding]::new^($false^)^)
 ) > "!PS_TMP!"

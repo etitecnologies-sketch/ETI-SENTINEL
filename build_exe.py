@@ -97,14 +97,17 @@ def build_edge_agent():
     else:
         print("[AVISO] pasta bin/ nao encontrada. Execute: python exportar_modelo.py")
 
-    # Cria um .env de exemplo para o cliente
-    with open(client_dist / ".env", "w") as f:
-        f.write("# Configurações ETI SENTINEL Edge\n")
+    # Cria um .env de exemplo para o cliente (preenchido pelo INSTALAR.bat)
+    with open(client_dist / ".env", "w", encoding="utf-8") as f:
+        f.write("# Configuracoes ETI SENTINEL Edge\n")
         f.write("INGEST_API_URL=https://eti-sentinel-production.up.railway.app\n")
         f.write("COLLECTOR_KEY=SUA_CHAVE_AQUI\n")
         f.write("CLIENT_ID=ID_DO_CLIENTE\n")
         f.write("AGENT_API_PORT=8808\n")
         f.write("ENABLE_STREAMING=1\n")
+        f.write("ENABLE_AI_ANALYTICS=1\n")
+        f.write("ENABLE_FIRE_DETECTION=1\n")
+        f.write("ENABLE_TAMPER_DETECTION=1\n")
 
     # Copia os scripts de instalacao/desinstalacao da pasta scripts/
     scripts_dir = here / "scripts"
