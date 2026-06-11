@@ -645,13 +645,9 @@ async function initDB() {
         ON ota_manifests (active, created_at DESC);
     `).catch(e => console.log("OTA Tables Error:", e.message));
 
-    // Seed regras IA padrão para clientes sem nenhuma regra
-    const clientsWithoutRules = await pool.query(`
-      SELECT c.id FROM clients c
-      LEFT JOIN automation_rules ar ON ar.client_id = c.id
-      WHERE ar.id IS NULL
-    `).catch(() => ({ rows: [] }));
-    for (const row of clientsWithoutRules.rows) {
+    // Seed regras IA padrão para todos os clientes (seedDefaultRules ignora as que já existem por nome)
+    const allClients = await pool.query(`SELECT id FROM clients`).catch(() => ({ rows: [] }));
+    for (const row of allClients.rows) {
       await seedDefaultRules(row.id);
     }
 
